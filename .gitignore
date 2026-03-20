@@ -37,3 +37,8 @@ Thumbs.db
 
 # Supabase local
 supabase/.temp/
+
+# AI agent scaffolding (not part of the project source)
+.agent/
+.agents/
+skills-lock.json

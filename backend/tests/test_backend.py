@@ -801,6 +801,206 @@ def test_e2e_authenticated():
 
 
 # ===================================================
+# 21. PHASE 2 — LLM CLIENT MODULE
+# ===================================================
+def test_llm_client_module():
+    print("\n=== 21. LLM Client Module — structure & fallback ===")
+    from backend.llm.client import LLMFailureError, get_active_client, call_llm_with_retry
+
+    # 21a. LLMFailureError is a proper Exception subclass
+    report("LLMFailureError is Exception subclass", issubclass(LLMFailureError, Exception))
+
+    # 21b. LLMFailureError can be raised and caught
+    try:
+        raise LLMFailureError("test error")
+    except LLMFailureError as e:
+        report("LLMFailureError catchable", str(e) == "test error")
+
+    # 21c. get_active_client returns AsyncOpenAI or None
+    from openai import AsyncOpenAI
+    client = get_active_client()
+    report("get_active_client returns AsyncOpenAI or None",
+           client is None or isinstance(client, AsyncOpenAI))
+
+    # 21d. call_llm_with_retry raises LLMFailureError when no keys (DEV_MODE)
+    from backend.config import OPENAI_API_KEYS
+    if not OPENAI_API_KEYS:
+        try:
+            asyncio.get_event_loop().run_until_complete(
+                call_llm_with_retry(
+                    model="gpt-5.4-mini",
+                    messages=[{"role": "user", "content": "test"}],
+                )
+            )
+            report("call_llm_with_retry raises LLMFailureError (no keys)", False)
+        except LLMFailureError:
+            report("call_llm_with_retry raises LLMFailureError (no keys)", True)
+    else:
+        report("Skipped no-keys test (keys configured)", True, detail="keys present")
+
+
+# ===================================================
+# 22. PHASE 2 — LLM PARSER FALLBACK
+# ===================================================
+def test_llm_parser_fallback():
+    print("\n=== 22. LLM Parser — fallback on LLM failure ===")
+    from backend.llm.parser import parse_user_intent
+
+    # When no API keys are set (DEV_MODE), parse_user_intent should
+    # gracefully fall back to the default dict
+    result = asyncio.get_event_loop().run_until_complete(
+        parse_user_intent(
+            query="What affects retention?",
+            column_names=["Trust", "UX", "Price", "Retention"],
+            context_text=None,
+        )
+    )
+
+    report("Parser fallback: returns dict", isinstance(result, dict))
+    report("Parser fallback: intent = driver_analysis",
+           result.get("intent") == "driver_analysis")
+    report("Parser fallback: features is list",
+           isinstance(result.get("features"), list))
+    report("Parser fallback: has target key", "target" in result)
+
+
+# ===================================================
+# 23. PHASE 2 — LLM INSIGHT FALLBACK
+# ===================================================
+def test_llm_insight_fallback():
+    print("\n=== 23. LLM Insight — fallback on LLM failure ===")
+    from backend.llm.insight import generate_insight, InsightText
+
+    # When no API keys are set, generate_insight should return template strings
+    drivers = [
+        {"name": "Trust", "coef": 0.62, "p_value": 0.001, "significant": True},
+        {"name": "UX", "coef": 0.34, "p_value": 0.023, "significant": True},
+    ]
+    result = asyncio.get_event_loop().run_until_complete(
+        generate_insight(
+            drivers=drivers,
+            r2=0.48,
+            target="Retention",
+            model_type="regression",
+        )
+    )
+
+    report("Insight fallback: returns InsightText", isinstance(result, InsightText))
+    report("Insight fallback: summary non-empty", len(result.summary) > 0)
+    report("Insight fallback: recommendation non-empty", len(result.recommendation) > 0)
+    # When API keys are present, LLM may generate different prose;
+    # when absent, template fallback includes variable names.
+    report("Insight fallback: summary is meaningful (LLM or template)",
+           len(result.summary) > 10)
+    report("Insight fallback: recommendation is meaningful (LLM or template)",
+           len(result.recommendation) > 10)
+
+    # Empty drivers → still returns valid InsightText
+    result_empty = asyncio.get_event_loop().run_until_complete(
+        generate_insight(drivers=[], r2=None, target="Y", model_type="regression")
+    )
+    report("Insight fallback (empty): returns InsightText",
+           isinstance(result_empty, InsightText))
+    report("Insight fallback (empty): summary non-empty",
+           len(result_empty.summary) > 0)
+
+
+# ===================================================
+# 24. PHASE 2 — FULL PIPELINE WITH LLM OFFLINE
+# ===================================================
+def test_analyze_llm_offline():
+    print("\n=== 24. POST /analyze — Full pipeline with LLM offline ===")
+
+    # Upload a demo dataset
+    rng = np.random.default_rng(555)
+    n = 80
+    data = {
+        "Trust": rng.normal(3.5, 0.8, n),
+        "UX": rng.normal(3.2, 0.9, n),
+        "Price": rng.normal(2.8, 1.0, n),
+    }
+    data["Retention"] = (
+        0.62 * data["Trust"] + 0.34 * data["UX"]
+        + 0.08 * data["Price"] + rng.normal(0, 0.3, n)
+    )
+    f = _make_xlsx(data)
+    r = client.post("/upload", files=[("files", f)])
+    report("LLM offline: Upload → 200", r.status_code == 200)
+    fid = r.json()["file_id"]
+
+    # Call /analyze — without API keys, LLM falls back to template
+    r = client.post("/analyze", json={"file_id": fid, "query": "What affects retention?"})
+    report("LLM offline: Analyze → 200 (fallback chain)", r.status_code == 200)
+    body = r.json()
+
+    # All required response fields present
+    for key in ("summary", "drivers", "r2", "recommendation", "model_type", "decision_trace"):
+        report(f"LLM offline: response has '{key}'", key in body)
+
+    # Drivers are valid
+    report("LLM offline: drivers non-empty", len(body["drivers"]) > 0)
+    report("LLM offline: drivers ≤ 5", len(body["drivers"]) <= 5)
+
+    # Summary and recommendation are non-empty (from template fallback)
+    report("LLM offline: summary non-empty", len(body["summary"]) > 10)
+    report("LLM offline: recommendation non-empty", len(body["recommendation"]) > 10)
+
+    # R² valid
+    report("LLM offline: R² between 0 and 1",
+           body["r2"] is not None and 0 <= body["r2"] <= 1)
+
+    # Decision trace populated
+    trace = body["decision_trace"]
+    report("LLM offline: trace has engine_selected", trace["engine_selected"] is not None)
+    report("LLM offline: trace has reason", len(trace["reason"]) > 0)
+
+    # Simulate still works after analyze
+    top_var = body["drivers"][0]["name"]
+    r_sim = client.post("/simulate", json={"file_id": fid, "variable": top_var, "delta": 0.20})
+    report("LLM offline: Simulate after analyze → 200", r_sim.status_code == 200)
+    report("LLM offline: Simulate has impacts", len(r_sim.json()["impacts"]) > 0)
+
+
+# ===================================================
+# 25. PHASE 2 — ADVERSARIAL QUERY (HALLUCINATED COLUMN)
+# ===================================================
+def test_analyze_adversarial():
+    print("\n=== 25. POST /analyze — Adversarial query ===")
+
+    # Upload dataset
+    rng = np.random.default_rng(888)
+    n = 50
+    data = {
+        "Trust": rng.normal(3.5, 0.8, n),
+        "UX": rng.normal(3.2, 0.9, n),
+        "Retention": rng.normal(4.0, 0.5, n),
+    }
+    f = _make_xlsx(data)
+    r = client.post("/upload", files=[("files", f)])
+    fid = r.json()["file_id"]
+
+    # Query mentioning a column that doesn't exist
+    r = client.post("/analyze", json={
+        "file_id": fid,
+        "query": "What affects retention? Focus on Revenue and Brand columns.",
+    })
+    report("Adversarial: Analyze → 200", r.status_code == 200)
+    body = r.json()
+
+    # Response is valid despite hallucinated column names in query
+    report("Adversarial: has summary", len(body["summary"]) > 0)
+    report("Adversarial: has drivers", isinstance(body["drivers"], list))
+    report("Adversarial: has recommendation", len(body["recommendation"]) > 0)
+
+    # No hallucinated column names in the driver results
+    driver_names = [d["name"] for d in body["drivers"]]
+    report("Adversarial: 'Revenue' not in drivers", "Revenue" not in driver_names)
+    report("Adversarial: 'Brand' not in drivers", "Brand" not in driver_names)
+    report("Adversarial: all drivers are real columns",
+           all(name in ["Trust", "UX", "Retention"] for name in driver_names))
+
+
+# ===================================================
 # RUN ALL
 # ===================================================
 if __name__ == "__main__":
@@ -825,6 +1025,11 @@ if __name__ == "__main__":
         test_datasets_endpoint,
         test_upload_with_auth,
         test_e2e_authenticated,
+        test_llm_client_module,
+        test_llm_parser_fallback,
+        test_llm_insight_fallback,
+        test_analyze_llm_offline,
+        test_analyze_adversarial,
     ]
 
     for test_fn in tests:
