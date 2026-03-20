@@ -46,9 +46,13 @@ if not DEV_MODE and len(OPENAI_API_KEYS) == 0:
     )
 
 # ---------------------------------------------------------------------------
-# CORS origin — "*" in dev, exact Vercel URL in production
+# CORS origin — "*" in dev, comma-separated URLs in production
+# Example: CORS_ORIGIN=https://stat.sotaworks.xyz,https://app.vercel.app
 # ---------------------------------------------------------------------------
-CORS_ORIGIN: str = os.environ.get("CORS_ORIGIN", "*")
+_cors_raw: str = os.environ.get("CORS_ORIGIN", "*")
+CORS_ORIGINS: list[str] = [
+    origin.strip().rstrip("/") for origin in _cors_raw.split(",") if origin.strip()
+]
 
 # ---------------------------------------------------------------------------
 # Supabase (optional — graceful degradation if missing)

@@ -11,7 +11,8 @@ function getBaseUrl(): string {
         "Add it to .env.local for development or Vercel project settings for production."
     );
   }
-  return url;
+  // Strip trailing slash to prevent double-slash URLs (e.g. "//sync-user")
+  return url.replace(/\/+$/, "");
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

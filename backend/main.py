@@ -8,7 +8,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.auth.context import get_current_user_id
-from backend.config import CORS_ORIGIN
+from backend.config import CORS_ORIGINS
 from backend.db import supabase as supa
 from backend.models import DatasetItem, DatasetListResponse, SyncUserRequest, SyncUserResponse
 from backend.upload import router as upload_router
@@ -33,7 +33,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[CORS_ORIGIN],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
