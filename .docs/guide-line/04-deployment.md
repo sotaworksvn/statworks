@@ -5,7 +5,7 @@
 | **Last updated** | 2026-03-21                           |
 | **Backend**      | Render.com (Python Web Service)      |
 | **Frontend**     | Vercel (Next.js)                     |
-| **Source**       | `render.yaml` · `frontend/`         |
+| **Source**       | `backend/render.yaml` · `frontend/` |
 
 ---
 
@@ -28,30 +28,21 @@
 
 ---
 
-## 2. Backend → Render.com
+## 2. Backend → Render.com (Free Tier)
 
 ### 2.1 Prerequisites
 
-- A [Render.com](https://render.com) account
+- A free [Render.com](https://render.com) account
 - GitHub repository connected to Render
 
-### 2.2 Setup via Blueprint (Recommended)
+> **Reference config:** `backend/render.yaml` contains the service definition for reference. You'll enter these settings manually in the Render dashboard (no Blueprint needed — that costs money).
 
-The project includes a `render.yaml` at the project root. This enables **Infrastructure-as-Code** deployment:
+### 2.2 Create Web Service (Free)
 
 1. Go to [Render Dashboard](https://dashboard.render.com)
-2. Click **New** → **Blueprint**
+2. Click **New** → **Web Service**
 3. Connect your GitHub repo
-4. Select the branch (e.g., `main`)
-5. Render will auto-detect `render.yaml` and create the service
-
-### 2.3 Manual Setup
-
-If not using Blueprint:
-
-1. **New** → **Web Service**
-2. Connect your GitHub repo
-3. Configure:
+4. Configure:
 
 | Setting            | Value                                                   |
 |--------------------|---------------------------------------------------------|
@@ -61,9 +52,9 @@ If not using Blueprint:
 | **Build Command**  | `pip install -e .`                                      |
 | **Start Command**  | `uvicorn backend.main:app --host 0.0.0.0 --port $PORT` |
 | **Health Check**   | `/health`                                               |
-| **Plan**           | Free / Starter                                          |
+| **Plan**           | **Free** (select Free instance type)                    |
 
-### 2.4 Environment Variables
+### 2.3 Environment Variables
 
 Set these in **Render Dashboard → Environment** (NOT in code or `render.yaml`):
 
@@ -83,7 +74,7 @@ Set these in **Render Dashboard → Environment** (NOT in code or `render.yaml`)
 | `R2_BUCKET_NAME`       | Recommended | R2 → Create bucket                        |
 | `CLERK_SECRET_KEY`     | Recommended | [dashboard.clerk.com](https://dashboard.clerk.com) → API Keys |
 
-### 2.5 Verify Deployment
+### 2.4 Verify Deployment
 
 ```bash
 # Check health (replace with your Render URL)
@@ -91,7 +82,7 @@ curl https://sota-statworks-api.onrender.com/health
 # Expected: {"status":"ok"}
 ```
 
-### 2.6 Pre-Demo Checklist
+### 2.5 Pre-Demo Checklist
 
 - [ ] `DEV_MODE=false`
 - [ ] `CORS_ORIGIN` matches exact Vercel URL
