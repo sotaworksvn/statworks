@@ -284,18 +284,19 @@ python backend/tests/test_backend.py
 
 ## 8. Deployment (Render.com)
 
-Config in `render.yaml` at project root:
+Config reference in `backend/render.yaml`:
 
 ```yaml
 services:
   - type: web
     name: sota-statworks-api
     runtime: python
-    rootDir: backend
-    buildCommand: pip install -e .
+    buildCommand: pip install -r backend/requirements.txt
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
 ```
+
+> **Important:** Root Directory must be **empty** (deploy from project root) because all Python imports use `from backend.xxx`.
 
 **Pre-demo checklist:**
 1. Set `DEV_MODE=false` in Render env vars

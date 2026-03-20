@@ -44,15 +44,15 @@
 3. Connect your GitHub repo
 4. Configure:
 
-| Setting            | Value                                                   |
-|--------------------|---------------------------------------------------------|
-| **Name**           | `sota-statworks-api`                                    |
-| **Runtime**        | Python                                                  |
-| **Root Directory** | `backend`                                               |
-| **Build Command**  | `pip install -e .`                                      |
-| **Start Command**  | `uvicorn backend.main:app --host 0.0.0.0 --port $PORT` |
-| **Health Check**   | `/health`                                               |
-| **Plan**           | **Free** (select Free instance type)                    |
+| Setting            | Value                                                        |
+|--------------------|------------------------------------------------------------- |
+| **Name**           | `sota-statworks-api`                                         |
+| **Runtime**        | Python                                                       |
+| **Root Directory** | *(leave empty — deploy from project root)*                   |
+| **Build Command**  | `pip install -r backend/requirements.txt`                    |
+| **Start Command**  | `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`      |
+| **Health Check**   | `/health`                                                    |
+| **Plan**           | **Free** (select Free instance type)                         |
 
 ### 2.3 Environment Variables
 
