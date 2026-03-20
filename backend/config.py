@@ -3,6 +3,15 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Auto-load .env from the backend directory (works from any working directory)
+_backend_dir = Path(__file__).resolve().parent
+_env_file = _backend_dir / ".env"
+if _env_file.exists():
+    load_dotenv(_env_file)
 
 
 def _get_env(key: str, required: bool = False) -> str | None:
@@ -40,3 +49,22 @@ if not DEV_MODE and len(OPENAI_API_KEYS) == 0:
 # CORS origin — "*" in dev, exact Vercel URL in production
 # ---------------------------------------------------------------------------
 CORS_ORIGIN: str = os.environ.get("CORS_ORIGIN", "*")
+
+# ---------------------------------------------------------------------------
+# Supabase (optional — graceful degradation if missing)
+# ---------------------------------------------------------------------------
+SUPABASE_URL: str | None = _get_env("SUPABASE_URL")
+SUPABASE_SERVICE_KEY: str | None = _get_env("SUPABASE_SERVICE_KEY")
+
+# ---------------------------------------------------------------------------
+# Cloudflare R2 (optional — graceful degradation if missing)
+# ---------------------------------------------------------------------------
+R2_ACCOUNT_ID: str | None = _get_env("R2_ACCOUNT_ID")
+R2_ACCESS_KEY_ID: str | None = _get_env("R2_ACCESS_KEY_ID")
+R2_SECRET_ACCESS_KEY: str | None = _get_env("R2_SECRET_ACCESS_KEY")
+R2_BUCKET_NAME: str | None = _get_env("R2_BUCKET_NAME")
+
+# ---------------------------------------------------------------------------
+# Clerk (optional — used only if JWT verification is needed server-side)
+# ---------------------------------------------------------------------------
+CLERK_SECRET_KEY: str | None = _get_env("CLERK_SECRET_KEY")

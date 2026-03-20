@@ -1,13 +1,18 @@
-"""Stub POST /analyze — heuristic-only, no LLM (Phase 1 · task 1.8)."""
+"""Stub POST /analyze — heuristic-only, no LLM (Phase 1 · task 1.8).
+
+Updated for Phase 1.5: async Supabase result persistence.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException
 
 from backend.engines.pls import PLSFallbackError, compute_pls
 from backend.engines.regression import RegressionResultData, compute_ols
+from backend.db import supabase as supa
 from backend.models import (
     AnalyzeRequest,
     AnalyzeResponse,
@@ -156,7 +161,7 @@ async def analyze(body: AnalyzeRequest) -> AnalyzeResponse:
             for d in result.drivers
         ]
 
-        return AnalyzeResponse(
+        response = AnalyzeResponse(
             summary=summary,
             drivers=drivers_out,
             r2=result.r2,
@@ -164,6 +169,14 @@ async def analyze(body: AnalyzeRequest) -> AnalyzeResponse:
             model_type=result.model_type,  # type: ignore[arg-type]
             decision_trace=trace,
         )
+
+        # 10. Async Supabase persistence (fire-and-forget, non-blocking)
+        if entry.user_id and supa.is_available():
+            asyncio.create_task(
+                _persist_analysis_result(entry.file_id, response.model_dump())
+            )
+
+        return response
 
     except HTTPException:
         raise
@@ -173,3 +186,15 @@ async def analyze(body: AnalyzeRequest) -> AnalyzeResponse:
             status_code=500,
             detail="Unexpected error. Please try again.",
         ) from exc
+
+
+async def _persist_analysis_result(file_id: str, result_dict: dict) -> None:
+    """Persist analysis result to Supabase (non-blocking background task)."""
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, supa.create_analysis, file_id, result_dict,
+        )
+        logger.info("Analysis result persisted to Supabase for file_id=%s", file_id)
+    except Exception as exc:
+        logger.error("Supabase analysis persist failed: %s", exc)

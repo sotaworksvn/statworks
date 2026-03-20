@@ -26,6 +26,8 @@ class FileEntry:
         "row_count",
         "context_text",
         "coefficient_cache",
+        "r2_key",
+        "user_id",
     )
 
     def __init__(
@@ -36,6 +38,8 @@ class FileEntry:
         row_count: int,
         context_text: str | None = None,
         coefficient_cache: dict[str, Any] | None = None,
+        r2_key: str | None = None,
+        user_id: str | None = None,
     ) -> None:
         self.file_id = file_id
         self.dataframe = dataframe
@@ -43,6 +47,8 @@ class FileEntry:
         self.row_count = row_count
         self.context_text = context_text
         self.coefficient_cache = coefficient_cache
+        self.r2_key = r2_key
+        self.user_id = user_id
 
 
 # ---------------------------------------------------------------------------

@@ -20,6 +20,7 @@
 | F-02 | [AI-Powered Driver Analysis](#f-02-ai-powered-driver-analysis) | `POST /analyze` | `draft` |
 | F-03 | [Scenario Simulation](#f-03-scenario-simulation) | `POST /simulate` | `draft` |
 | F-04 | [Frontend — Single-Screen Decision Interface](#f-04-frontend--single-screen-decision-interface) | — (Next.js) | `draft` |
+| F-05 | [Authentication & Identity](#f-05-authentication--identity) | — (Clerk + Supabase) | `draft` |
 
 ---
 
@@ -95,7 +96,9 @@ The Data Ingestion feature is the entry point of every user session. It accepts 
   columns: [{ name: str, dtype: str, is_numeric: bool }],
   row_count: int,
   context_text: str | None,       # concatenated text from .docx / .pptx
-  coefficient_cache: dict | None  # populated after /analyze; used by /simulate
+  coefficient_cache: dict | None, # populated after /analyze; used by /simulate
+  r2_key: str | None,             # R2 object key (if persisted to Cloudflare R2)
+  user_id: str | None             # clerk_user_id (if authenticated)
 }
 ```
 
@@ -128,7 +131,9 @@ Client  →  POST /upload (multipart: survey.xlsx + strategy.pptx)
            ├─ Normalise column names
            ├─ Detect column dtypes
            ├─ Generate file_id (UUID v4)
-           ├─ Store { dataframe, context_text } in-memory
+           ├─ Store { dataframe, context_text } in-memory (cache)
+           ├─ Upload raw file to Cloudflare R2 (async, non-blocking)
+           ├─ Store metadata to Supabase: { file_id, user_id, file_name, r2_key }
            └─ Return 200 { file_id, columns, row_count, context_extracted: true }
 ```
 
@@ -718,14 +723,17 @@ The frontend is a **single-screen decision interface** — not a dashboard and n
 
 ```typescript
 interface AppStore {
+  user: ClerkUser | null       // from Clerk useUser() — { id, firstName, imageUrl }
   fileId: string | null
   datasetName: string | null
   rowCount: number | null
-  columns: Column[]          // { name, dtype, is_numeric }
+  columns: Column[]            // { name, dtype, is_numeric }
   insight: InsightResult | null
   simulation: SimulationResult | null
   isAnalyzing: boolean
   isSimulating: boolean
+  isUploading: boolean
+  uploadProgress: number       // 0-100 for R2 presigned URL upload
   analyzeError: string | null
   simulateError: string | null
 }
@@ -859,3 +867,190 @@ User → select variable in VariableSelect
 | Component tree | See System Design §4.5 |
 | Animation WOW moments | Bar grow (DriverChart) · Count-up (ResultBadge) · Fade-in progressive reveal (InsightPanel) |
 | PRD design rules | No jargon in default view · RecommendationCard always visible · No multi-page navigation |
+| Auth integration | Clerk `@clerk/nextjs` · `useUser()` for identity · `x-clerk-user-id` header on all API calls |
+
+---
+
+---
+
+# F-05: Authentication & Identity
+
+| Field | Value |
+|---|---|
+| **Status** | `draft` |
+| **Stack** | Clerk (`@clerk/nextjs`), Supabase (`supabase-py`), Cloudflare R2 (`boto3`) |
+| **PRD reference** | PRD §4 User Need 5; PRD §5 Scope — Authentication, Metadata persistence, Object storage |
+| **System Design ref** | SD §3 Tech Stack, SD §6.1 Security, SD §6.2 Data Architecture, SD §11 Updated Architecture |
+| **ADRs** | ADR-0001 (Clerk), ADR-0002 (Supabase), ADR-0003 (R2) |
+
+---
+
+## 1. Overview
+
+Authentication & Identity provides the persistence and personalisation layer for SOTA StatWorks. It enables users to log in via Google (Clerk), have their datasets and analyses persist across sessions (Supabase + R2), and resume work without re-uploading. This feature does NOT affect the statistical engine or LLM layer — identity is decoupled from computation.
+
+**Who it serves:** All users — especially hackathon judges who demo the product across multiple sessions and need to see results persist.
+
+**Why it exists:** Without persistence, the product resets on every browser refresh. This feature turns a stateless demo into a stateful-lite product that feels production-grade.
+
+---
+
+## 2. Requirements
+
+### 2.1 Functional Requirements
+
+| ID | Requirement |
+|---|---|
+| FR-05-01 | Users MUST be able to log in via Google OAuth using Clerk's prebuilt `<SignIn />` component. |
+| FR-05-02 | After login, the frontend MUST include `x-clerk-user-id` header in all API requests to the backend. |
+| FR-05-03 | The backend MUST extract `clerk_user_id` from the `x-clerk-user-id` request header. |
+| FR-05-04 | On first login, the backend MUST create a user record in Supabase (`users` table). |
+| FR-05-05 | On dataset upload, the backend MUST: (a) upload the file to R2, (b) store metadata in Supabase (`datasets` table), (c) cache the DataFrame in memory. |
+| FR-05-06 | On analysis completion, the backend MUST store the result in Supabase (`analyses` table) as JSONB. |
+| FR-05-07 | When a logged-in user returns, the frontend MUST display a "Welcome back, {name}" message and show previous datasets (if any). |
+| FR-05-08 | The R2 bucket MUST use the path structure: `users/{clerk_user_id}/datasets/{dataset_id}.csv`. |
+| FR-05-09 | All R2 access MUST use time-limited presigned URLs. No public bucket access. |
+| FR-05-10 | The system MUST gracefully degrade: if Clerk/Supabase/R2 are unreachable, the app falls back to in-memory-only mode (no persistence, no auth). |
+
+### 2.2 Non-Functional Requirements
+
+| ID | Requirement |
+|---|---|
+| NFR-05-01 | Auth overhead MUST add < 200ms to any API request (header extraction only, no Clerk API call on every request). |
+| NFR-05-02 | R2 presigned URL generation MUST complete in < 500ms. |
+| NFR-05-03 | Supabase metadata writes MUST be async (non-blocking) to avoid adding to the < 2s latency budget. |
+
+### 2.3 Acceptance Criteria
+
+- User clicks "Sign in with Google" → Clerk handles OAuth flow → user is logged in and sees "Welcome, {name}".
+- Upload a dataset while logged in → file persists in R2, metadata in Supabase.
+- Refresh the browser → user is still logged in, previous dataset is available.
+- Call `/analyze` → result is stored in Supabase.
+- Clerk is unreachable → app still works in anonymous mode (no persistence).
+
+---
+
+## 3. Data Model
+
+### Supabase Tables
+
+```sql
+-- users
+id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+clerk_user_id text UNIQUE NOT NULL,
+email text,
+name text,
+created_at timestamp DEFAULT now()
+
+-- datasets
+id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+user_id uuid REFERENCES users(id),
+file_name text NOT NULL,
+r2_key text NOT NULL,
+created_at timestamp DEFAULT now()
+
+-- analyses
+id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+dataset_id uuid REFERENCES datasets(id),
+result jsonb NOT NULL,
+created_at timestamp DEFAULT now()
+```
+
+### R2 Bucket Layout
+
+```
+bucket/
+  users/
+    {clerk_user_id}/
+      datasets/
+        {dataset_id}.csv
+      outputs/
+        {analysis_id}.json
+```
+
+---
+
+## 4. Flows
+
+### 4.1 Login Flow
+
+```
+User → clicks "Sign in with Google"
+       │
+       ├─ Clerk handles OAuth redirect
+       ├─ On success: Clerk session established
+       ├─ Frontend: useUser() returns { id, firstName, imageUrl }
+       ├─ Store user in Zustand
+       └─ All subsequent API calls include x-clerk-user-id header
+```
+
+### 4.2 Authenticated Upload Flow
+
+```
+User → drag file onto DropZone (authenticated)
+       │
+       ├─ Frontend: request presigned upload URL from backend
+       │    POST /upload/presign { file_name, clerk_user_id }
+       ├─ Backend: generate presigned URL via R2 (boto3)
+       ├─ Frontend: upload file directly to R2 using presigned URL
+       ├─ Frontend: confirm upload to backend
+       │    POST /upload { file_name, r2_key, clerk_user_id }
+       ├─ Backend: fetch file from R2, parse to DataFrame
+       ├─ Backend: store metadata in Supabase
+       ├─ Backend: cache DataFrame in memory
+       └─ Return 200 { file_id, columns, row_count }
+```
+
+### 4.3 Session Resume Flow
+
+```
+User → returns to app (already logged in via Clerk session)
+       │
+       ├─ Frontend: useUser() returns existing session
+       ├─ Frontend: fetch user's datasets from backend
+       │    GET /datasets?user_id={clerk_user_id}
+       ├─ Backend: query Supabase for user's datasets
+       └─ Frontend: display dataset list or last analysis result
+```
+
+---
+
+## 5. Boundaries
+
+**This feature owns:**
+- Clerk integration (frontend `<ClerkProvider>`, `useUser()`, `x-clerk-user-id` header)
+- Backend auth context extraction (`auth/context.py`)
+- Supabase client and metadata CRUD (`db/supabase.py`)
+- R2 client and presigned URL generation (`storage/r2.py`)
+- User table, dataset table, analyses table in Supabase
+
+**This feature does NOT own:**
+- Statistical computation (→ F-02)
+- LLM calls (→ F-02)
+- Simulation (→ F-03)
+- In-memory cache management (→ F-01)
+- Frontend components beyond auth UI (→ F-04)
+
+---
+
+## 6. Technical Decisions
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Auth provider | Clerk | Prebuilt UI, Google OAuth, session management offloaded. See ADR-0001 |
+| Metadata DB | Supabase (PostgreSQL) | Managed, free tier, JSONB, Python SDK. See ADR-0002 |
+| Object storage | Cloudflare R2 | Zero egress, S3-compatible, 10 GB free. See ADR-0003 |
+| Backend auth | Header extraction only (`x-clerk-user-id`) | No Clerk SDK on backend; minimal overhead; identity decoupled from computation |
+| Supabase writes | Async (non-blocking) | Metadata persistence must not add to the < 2s latency budget |
+| R2 upload | Presigned URL (client-direct) | Backend never handles raw file bytes; reduces RAM pressure on Render free tier |
+| Graceful degradation | Fallback to in-memory-only if services unreachable | Demo must work even if Clerk/Supabase/R2 are down |
+
+---
+
+## 7. Open Points
+
+| # | Question | Options |
+|---|---|---|
+| OP-F05-1 | Should the backend verify the Clerk JWT or trust the `x-clerk-user-id` header? | (a) Trust header (simpler, faster); (b) Verify JWT server-side (more secure, adds Clerk SDK dependency) |
+| OP-F05-2 | Should Supabase RLS be enabled for v1 demo? | (a) Yes — enforce row-level access; (b) No — service key bypasses RLS, simpler for demo |
+| OP-F05-3 | Should the frontend show a dataset history list, or just auto-load the last dataset? | (a) Show list; (b) Auto-load last only |

@@ -1,15 +1,25 @@
-"""POST /upload — Data Ingestion endpoint (F-01)."""
+"""POST /upload — Data Ingestion endpoint (F-01).
+
+Updated for Phase 1.5: async R2 persistence + Supabase metadata.
+"""
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 from pathlib import PurePath
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 
-from backend.models import ColumnMeta, UploadResponse
+from backend.auth.context import get_current_user_id
+from backend.db import supabase as supa
+from backend.models import ColumnMeta, PresignRequest, PresignResponse, UploadResponse
+from backend.storage import r2
 from backend.store import FileEntry, set_entry
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -84,12 +94,99 @@ def _detect_columns(df: pd.DataFrame) -> list[ColumnMeta]:
 
 
 # ---------------------------------------------------------------------------
-# Route
+# Async persistence helpers (fire-and-forget)
 # ---------------------------------------------------------------------------
 
+async def _persist_to_r2(
+    r2_key: str,
+    content: bytes,
+    content_type: str,
+) -> None:
+    """Upload file bytes to R2 in a background task (non-blocking)."""
+    try:
+        # boto3 is synchronous — run in thread pool
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            r2.upload_file_bytes,
+            r2_key,
+            content,
+            content_type,
+        )
+        logger.info("R2 upload complete: %s", r2_key)
+    except Exception as exc:
+        logger.error("R2 background upload failed: %s", exc)
+
+
+async def _persist_metadata(
+    clerk_user_id: str,
+    file_id: str,
+    file_name: str,
+    r2_key: str,
+) -> None:
+    """Upsert user + create dataset row in Supabase (non-blocking)."""
+    try:
+        loop = asyncio.get_running_loop()
+        # Upsert user
+        db_user_id = await loop.run_in_executor(
+            None, supa.upsert_user, clerk_user_id, None, None,
+        )
+        if db_user_id:
+            # Create dataset
+            await loop.run_in_executor(
+                None, supa.create_dataset, db_user_id, file_name, r2_key, file_id,
+            )
+        logger.info("Supabase metadata persisted for file_id=%s", file_id)
+    except Exception as exc:
+        logger.error("Supabase background persist failed: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+@router.post("/upload/presign", response_model=PresignResponse)
+async def upload_presign(body: PresignRequest, request: Request) -> PresignResponse:
+    """Generate a presigned upload URL for direct R2 upload from the frontend.
+
+    Requires ``x-clerk-user-id`` header.  Returns the presigned URL and R2 key.
+    """
+    clerk_user_id = get_current_user_id(request)
+    if not clerk_user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="x-clerk-user-id header is required for presigned URL generation.",
+        )
+
+    if not r2.is_available():
+        raise HTTPException(
+            status_code=503,
+            detail="R2 storage is not configured.",
+        )
+
+    dataset_id = str(uuid.uuid4())
+    ext = _get_extension(body.file_name) or ".csv"
+    r2_key = r2.make_dataset_key(clerk_user_id, dataset_id, ext)
+
+    upload_url = r2.generate_presigned_upload_url(r2_key)
+    if not upload_url:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate presigned URL.",
+        )
+
+    return PresignResponse(upload_url=upload_url, r2_key=r2_key)
+
+
 @router.post("/upload", response_model=UploadResponse)
-async def upload(files: list[UploadFile] = File(...)) -> UploadResponse:
-    """Accept one or more files, parse data and context, return metadata."""
+async def upload(request: Request, files: list[UploadFile] = File(...)) -> UploadResponse:
+    """Accept one or more files, parse data and context, return metadata.
+
+    Phase 1.5: also persists to R2 + Supabase asynchronously if available.
+    """
+
+    # Extract user identity (None for anonymous)
+    clerk_user_id = get_current_user_id(request)
 
     # 1. Read all files and validate extensions + sizes
     file_data: list[tuple[str, str, bytes]] = []  # (filename, ext, content)
@@ -154,15 +251,30 @@ async def upload(files: list[UploadFile] = File(...)) -> UploadResponse:
     row_count = len(df)
     file_id = str(uuid.uuid4())
 
-    # 6. Store entry
+    # 6. Build R2 key (if user is authenticated)
+    r2_key: str | None = None
+    if clerk_user_id and r2.is_available():
+        r2_key = r2.make_dataset_key(clerk_user_id, file_id, primary_ext)
+
+    # 7. Store entry in-memory (cache)
     entry = FileEntry(
         file_id=file_id,
         dataframe=df,
         columns=[c.model_dump() for c in columns],
         row_count=row_count,
         context_text=context_text,
+        r2_key=r2_key,
+        user_id=clerk_user_id,
     )
     await set_entry(entry)
+
+    # 8. Async persistence — fire-and-forget (non-blocking)
+    if r2_key and r2.is_available():
+        content_type = "text/csv" if primary_ext == ".csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        asyncio.create_task(_persist_to_r2(r2_key, primary_content, content_type))
+
+    if clerk_user_id and r2_key and supa.is_available():
+        asyncio.create_task(_persist_metadata(clerk_user_id, file_id, primary_fn, r2_key))
 
     return UploadResponse(
         file_id=file_id,
@@ -170,3 +282,4 @@ async def upload(files: list[UploadFile] = File(...)) -> UploadResponse:
         row_count=row_count,
         context_extracted=context_text is not None,
     )
+

@@ -78,6 +78,34 @@ class SimulationResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Presign (F-05 — infrastructure)
+# ---------------------------------------------------------------------------
+
+class PresignRequest(BaseModel):
+    file_name: str
+
+
+class PresignResponse(BaseModel):
+    upload_url: str
+    r2_key: str
+
+
+# ---------------------------------------------------------------------------
+# Dataset listing (F-05 — infrastructure)
+# ---------------------------------------------------------------------------
+
+class DatasetItem(BaseModel):
+    id: str
+    file_name: str
+    r2_key: str
+    created_at: str
+
+
+class DatasetListResponse(BaseModel):
+    datasets: list[DatasetItem]
+
+
+# ---------------------------------------------------------------------------
 # Internal models used across modules
 # ---------------------------------------------------------------------------
 

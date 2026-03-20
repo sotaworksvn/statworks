@@ -7,7 +7,7 @@
 | **Project**  | SOTA StatWorks               |
 | **Created**  | 2026-03-20                   |
 | **Last updated** | 2026-03-20               |
-| **Version**  | 0.1                          |
+| **Version**  | 0.2                          |
 
 ---
 
@@ -98,6 +98,15 @@ Every insight view ends with an explicitly labelled **Recommendation** card — 
 
 ---
 
+### Need 5 — Resume a session without re-uploading data
+
+> "I uploaded my dataset yesterday. When I come back today, I don't want to re-upload — I want to see my previous results instantly."
+
+**Scenario — Judge / returning user:**
+A hackathon judge logs in via Google, uploads a dataset, reviews insights, then closes the browser. The next day (or during a second demo round), the judge logs in again and sees the same dataset and analysis results immediately — no re-upload, no re-analysis. This is enabled by persistent storage (Cloudflare R2 for files, Supabase for metadata) and identity (Clerk for login).
+
+---
+
 ## 5. Scope
 
 ### In Scope (v1 — Hackathon Demo)
@@ -109,8 +118,11 @@ Every insight view ends with an explicitly labelled **Recommendation** card — 
 | **AI layer** | LLM-powered intent parsing and variable extraction via `gpt-5.4-mini` (Call 1); insight generation via `gpt-5.4` (Call 2). Accessed via OpenAI API with sponsored credits. |
 | **Scenario simulation** | Single-variable delta propagation (1-hop and multi-hop via directed graph) |
 | **Core endpoints** | `POST /upload`, `POST /analyze`, `POST /simulate` |
-| **Frontend** | Single-screen Next.js app: Chat panel (input), Insight panel (output), Simulation bar (bottom) |
-| **UX** | Progressive reveal, micro-animations, slider-based simulation, no statistics jargon in default view |
+| **Authentication** | Clerk-based Google OAuth login; session management; user identity passed to backend via `x-clerk-user-id` header |
+| **Metadata persistence** | Supabase (PostgreSQL) for user records, dataset metadata, and analysis results |
+| **Object storage** | Cloudflare R2 for raw dataset files and analysis output; presigned URL upload/download |
+| **Frontend** | Single-screen Next.js app: Chat panel (input), Insight panel (output), Simulation bar (bottom), identity-aware UI |
+| **UX** | Progressive reveal, micro-animations, slider-based simulation, no statistics jargon in default view, persistent session resume |
 | **Insight output** | Summary sentence, ranked driver chart, actionable recommendation card, collapsible model details |
 | **Reliability** | LLM retry (×2), validation layer filtering hallucinated variables, hard fallback to regression + top numeric columns |
 
@@ -120,7 +132,6 @@ Every insight view ends with an explicitly labelled **Recommendation** card — 
 |---|---|
 | Full academic PLS (HTMT, AVE, discriminant validity reports) | Over-engineered for demo; adds complexity without decision value |
 | Multi-page or tabbed navigation | Violates single-screen paradigm; reduces wow factor |
-| User accounts / authentication | Not needed for hackathon demo |
 | Real-time / streaming data ingestion | Outside the 20–30h build window |
 | Automated report PDF generation | Nice-to-have; deferred to future version |
 | Celery / Redis async queue (bootstrap > 500) | Optional; only added if bootstrap performance is a bottleneck |
@@ -159,9 +170,9 @@ Every insight view ends with an explicitly labelled **Recommendation** card — 
 | **Build window** | 20–30 hours total (hackathon timeline) |
 | **Demo duration** | ≤ 5 minutes; every user action must complete in ≤ 10 seconds |
 | **LLM cost** | OpenAI API with sponsored credits: $100 per account × 4 accounts = $400 total. `gpt-5.4-mini` (Call 1): $0.75/1M input, $4.50/1M output — ~$0.00075/request. `gpt-5.4` (Call 2): $2.50/1M input, $15.00/1M output — ~$0.0025/request. Total per `/analyze` call: ~$0.003. Budget is effectively unconstrained for demo scale. |
-| **Tech stack** | Backend: FastAPI + Python; Frontend: Next.js (App Router) + TypeScript + TailwindCSS; Charts: Recharts; Animation: Framer Motion |
+| **Tech stack** | Backend: FastAPI + Python; Frontend: Next.js (App Router) + TypeScript + TailwindCSS; Charts: Recharts; Animation: Framer Motion; Auth: Clerk (`@clerk/nextjs`); DB: Supabase (`supabase-py`); Storage: Cloudflare R2 (`boto3`) |
 | **Target devices** | Desktop browser only (1280px+ viewport); no mobile breakpoints required for v1 |
-| **No external database** | All state is in-memory per request; no persistence layer required for v1 |
+| **Persistence layer** | Supabase (PostgreSQL) for metadata; Cloudflare R2 for dataset files. In-memory store remains as a cache layer for fast access to the latest dataset. |
 
 ---
 
@@ -186,11 +197,17 @@ Every insight view ends with an explicitly labelled **Recommendation** card — 
 | Frontend Blueprint | _(source brief — see conversation context)_ | Reference |
 | UI/UX Design System | _(source brief — see conversation context)_ | Reference |
 | System Design | `.docs/02-system-design.md` | `draft` |
+| Feature Specifications | `.docs/03-features-spec.md` | `draft` |
+| Development Rules | `.docs/04-rule.md` | `draft` |
+| Task Plan | `.docs/05-tasks-plan.md` | `draft` |
 | Codebase Summary | `.docs/03-codebase-summary.md` | Not yet created |
+| ADR-0001 — Clerk Authentication | `docs/adrs/0001-clerk-authentication.md` | `proposed` |
+| ADR-0002 — Supabase Metadata | `docs/adrs/0002-supabase-metadata.md` | `proposed` |
+| ADR-0003 — Cloudflare R2 Storage | `docs/adrs/0003-cloudflare-r2-storage.md` | `proposed` |
 
 ### Downstream Specs
 
-_No feature specs created yet. Will be linked here as they are decomposed._
+- `.docs/03-features-spec.md` — F-01 through F-05
 
 ---
 

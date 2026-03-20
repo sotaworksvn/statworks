@@ -6,7 +6,7 @@
 | **Team**         | Phú Nhuận Builder x SOTA Works                      |
 | **Created**      | 2026-03-20                                          |
 | **Last updated** | 2026-03-20                                          |
-| **Build order**  | Phase 1: Backend → Phase 2: AI/LLM → Phase 3: Frontend |
+| **Build order**  | Phase 1: Backend → Phase 1.5: Infra Services → Phase 2: AI/LLM → Phase 3: Frontend |
 | **Source docs**  | `01-prd.md` · `02-system-design.md` · `03-features-spec.md` · `04-rule.md` |
 
 ---
@@ -16,14 +16,16 @@
 ```
 Phase 1 — Backend Core (no LLM)
   ↓ statistical engines + endpoints work independently
+Phase 1.5 — Infrastructure Services (Clerk, Supabase, R2)
+  ↓ auth, persistence, storage modules ready
 Phase 2 — AI / LLM Integration
   ↓ LLM layer wraps the already-tested backend
 Phase 3 — Frontend
-  ↓ landing page first, then app screen
+  ↓ landing page first, then app screen + auth UI
   ↓ all API calls hit a fully working backend
 ```
 
-The backend is built first so that the statistical core can be tested and validated with known datasets before any frontend or LLM work begins. The AI layer is added second so that the full `/analyze` pipeline can be verified end-to-end over HTTP before the frontend is wired. The frontend is built last, starting with the landing page, then the single-screen app.
+The backend is built first so that the statistical core can be tested and validated with known datasets before any frontend or LLM work begins. Infrastructure services (Clerk, Supabase, R2) are integrated next to establish the persistence and auth layer before wiring the AI pipeline. The AI layer is added third so that the full `/analyze` pipeline can be verified end-to-end over HTTP. The frontend is built last, starting with the landing page, then the single-screen app with auth integration.
 
 ---
 
@@ -154,10 +156,63 @@ The backend is built first so that the statistical core can be tested and valida
 
 | # | Task | Rule | Acceptance |
 |---|---|---|---|
-| `[ ]` | **1.9.1** Create `backend/config.py`. Read `OPENAI_API_KEY_1` through `OPENAI_API_KEY_4` and `CORS_ORIGIN` from `os.environ`. Fail loudly at import time if required vars are missing in non-development mode. | Security: API keys in env vars only | Missing key → `ValueError` with descriptive message |
+| `[ ]` | **1.9.1** Create `backend/config.py`. Read all environment variables: `OPENAI_API_KEY_1` through `OPENAI_API_KEY_4`, `CORS_ORIGIN`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `CLERK_SECRET_KEY`. Fail loudly at import time if required vars are missing in non-development mode. Optional vars (Supabase, R2, Clerk) should log warnings if missing but not crash. | Security: API keys in env vars only | Missing OpenAI key → `ValueError`; missing Supabase key → warning log |
 | `[ ]` | **1.9.2** Create `render.yaml` (or configure via Render dashboard): service type = Web Service, build command = `pip install -e .`, start command = `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`. | Git & Deployment | Render deploy succeeds |
 | `[ ]` | **1.9.3** Add `.gitignore` at project root: `__pycache__/`, `*.pyc`, `.env`, `.env.local`, `node_modules/`, `.next/`, `dist/`. | Git & Deployment | gitignore file committed |
 | `[ ]` | **1.9.4** Deploy backend to Render.com and verify `GET /health` returns 200 on the live URL. | Git & Deployment; Common–API: health endpoint | Live URL `/health` → 200 |
+
+---
+
+---
+
+# Phase 1.5 — Infrastructure Services (Clerk, Supabase, R2)
+
+> **Goal:** Set up external services and integrate backend modules for authentication (Clerk), metadata persistence (Supabase), and object storage (Cloudflare R2). After this phase, the backend can persist data and identify users.
+>
+> **Rule references:** `04-rule.md` §Common–Authentication, §Common–Storage, §Common–Metadata; ADR-0001, ADR-0002, ADR-0003; Feature Spec F-05
+
+---
+
+## 1.5.1 — Supabase Setup
+
+| # | Task | Rule | Acceptance |
+|---|---|---|---|
+| `[ ]` | **1.5.1.1** Create a Supabase project. Note the `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`. | Metadata: use supabase-py | Project created; URL accessible |
+| `[ ]` | **1.5.1.2** Create `users` table: `id uuid PK`, `clerk_user_id text UNIQUE`, `email text`, `name text`, `created_at timestamp DEFAULT now()`. | F-05 §3 Data Model | Table exists in Supabase dashboard |
+| `[ ]` | **1.5.1.3** Create `datasets` table: `id uuid PK`, `user_id uuid FK→users`, `file_name text`, `r2_key text`, `created_at timestamp DEFAULT now()`. | F-05 §3 Data Model | Table exists |
+| `[ ]` | **1.5.1.4** Create `analyses` table: `id uuid PK`, `dataset_id uuid FK→datasets`, `result jsonb`, `created_at timestamp DEFAULT now()`. | F-05 §3 Data Model | Table exists |
+| `[ ]` | **1.5.1.5** Create `backend/db/supabase.py`: initialise `supabase` client from env vars. Implement `upsert_user(clerk_user_id, email, name)`, `create_dataset(user_id, file_name, r2_key)`, `create_analysis(dataset_id, result)`, `get_user_datasets(clerk_user_id)`. | Metadata: supabase-py client; async non-blocking | Functions importable and callable |
+| `[ ]` | **1.5.1.6** Implement graceful degradation: if Supabase env vars are missing or client fails to connect, fall back to in-memory-only mode with a warning log. | Metadata: Supabase is optional | Missing env vars → warning, not crash |
+
+---
+
+## 1.5.2 — Cloudflare R2 Setup
+
+| # | Task | Rule | Acceptance |
+|---|---|---|---|
+| `[ ]` | **1.5.2.1** Create a Cloudflare R2 bucket. Note `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`. Ensure no public access. | Storage: no public bucket | Bucket created; no public URL |
+| `[ ]` | **1.5.2.2** Create `backend/storage/r2.py`: initialise `boto3` S3 client with R2 endpoint URL. Implement `generate_presigned_upload_url(key, expires_in)`, `generate_presigned_download_url(key, expires_in)`, `get_file_stream(key)`. | Storage: boto3 + S3-compatible; presigned URLs only | Functions importable; presigned URL is valid |
+| `[ ]` | **1.5.2.3** Verify presigned upload: generate a URL, upload a test file via `curl`, verify file exists in R2 dashboard. | Storage: presigned URL workflow | File appears in R2 |
+| `[ ]` | **1.5.2.4** Implement graceful degradation: if R2 env vars are missing, fall back to in-memory-only storage with a warning log. | Storage: R2 is optional for core functionality | Missing env vars → warning, not crash |
+
+---
+
+## 1.5.3 — Clerk Setup
+
+| # | Task | Rule | Acceptance |
+|---|---|---|---|
+| `[ ]` | **1.5.3.1** Create a Clerk application. Enable Google OAuth. Note `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`. | Auth: Clerk for authentication | Application created in Clerk dashboard |
+| `[ ]` | **1.5.3.2** Create `backend/auth/context.py`: implement `get_current_user_id(request: Request) -> str | None` that reads `x-clerk-user-id` from headers. | Auth: header extraction only, no Clerk SDK on backend | Function importable |
+| `[ ]` | **1.5.3.3** Implement anonymous mode: if `x-clerk-user-id` header is missing, return `None` and proceed without user context. | Auth: optional, app works without Clerk | Missing header → None, no crash |
+
+---
+
+## 1.5.4 — Integration Smoke Test
+
+| # | Task | Rule | Acceptance |
+|---|---|---|---|
+| `[ ]` | **1.5.4.1** Test full persistence flow: upload a file → verify it appears in R2 → verify metadata in Supabase → call `/analyze` → verify result in Supabase → call `/simulate` → verify coefficient cache works. | F-05 Acceptance Criteria | All persistence steps verified |
+| `[ ]` | **1.5.4.2** Test graceful degradation: unset all Supabase/R2/Clerk env vars → verify backend still starts → verify upload/analyze/simulate work in in-memory-only mode. | Auth/Storage/Metadata: all optional | Backend works without external services |
 
 ---
 
@@ -246,12 +301,12 @@ The backend is built first so that the statistical core can be tested and valida
 | # | Task | Rule | Acceptance |
 |---|---|---|---|
 | `[ ]` | **3.1.1** Create Next.js 14 app in `frontend/` using App Router with TypeScript: `npx create-next-app@latest frontend --typescript --tailwind --app --no-src-dir`. | SD §3 Tech Stack | `npm run dev` starts without errors |
-| `[ ]` | **3.1.2** Install additional dependencies: `framer-motion`, `recharts`, `zustand`, `@tanstack/react-query`, `react-dropzone`, `@shadcn/ui` (init with `npx shadcn-ui@latest init`). | SD §3 Tech Stack | `npm install` succeeds; no peer dependency errors |
-| `[ ]` | **3.1.3** Create `frontend/.env.local` with `NEXT_PUBLIC_BACKEND_URL=http://localhost:8000`. Add `.env.local` to `.gitignore`. Set the production Render URL in Vercel dashboard environment variables. | Git & Deployment; API Layer: NEXT_PUBLIC_BACKEND_URL mandatory | Env var readable via `process.env.NEXT_PUBLIC_BACKEND_URL` |
+| `[ ]` | **3.1.2** Install additional dependencies: `framer-motion`, `recharts`, `zustand`, `@tanstack/react-query`, `react-dropzone`, `@shadcn/ui` (init with `npx shadcn-ui@latest init`), `@clerk/nextjs`. | SD §3 Tech Stack; ADR-0001 | `npm install` succeeds; no peer dependency errors |
+| `[ ]` | **3.1.3** Create `frontend/.env.local` with `NEXT_PUBLIC_BACKEND_URL=http://localhost:8000` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...`. Add `.env.local` to `.gitignore`. Set the production Render URL and Clerk key in Vercel dashboard environment variables. | Git & Deployment; API Layer: NEXT_PUBLIC_BACKEND_URL mandatory; Auth: Clerk key | Env vars readable via `process.env` |
 | `[ ]` | **3.1.4** Create `frontend/lib/api.ts`. Implement three typed async functions: `uploadFile(files: File[]) → Promise<UploadResult>`, `analyzeDataset(fileId: string, query: string) → Promise<InsightResult>`, `simulateScenario(fileId: string, variable: string, delta: number) → Promise<SimulationResult>`. Each reads `NEXT_PUBLIC_BACKEND_URL` or throws. | API Layer: backend URL via env var; API Layer: typed functions only | TypeScript compiles; functions importable |
-| `[ ]` | **3.1.5** Create `frontend/lib/store.ts`. Define and export the Zustand store with all fields: `fileId`, `datasetName`, `rowCount`, `columns`, `insight`, `simulation`, `isAnalyzing`, `isSimulating`, `analyzeError`, `simulateError`. | State Management: Zustand for UI state | Store importable; initial state is nulls |
-| `[ ]` | **3.1.6** Define all TypeScript interfaces in `frontend/lib/types.ts`: `UploadResult`, `Column`, `InsightResult`, `DriverResult`, `DecisionTrace`, `SimulationResult`, `ImpactResult`. All must be `readonly` where applicable. | TypeScript: all API responses explicitly typed | All interfaces compile; no `any` |
-| `[ ]` | **3.1.7** Wrap `app/layout.tsx` with `QueryClientProvider` (React Query). | State Management: React Query for server state | Provider wraps the app |
+| `[ ]` | **3.1.5** Create `frontend/lib/store.ts`. Define and export the Zustand store with all fields: `user`, `fileId`, `datasetName`, `rowCount`, `columns`, `insight`, `simulation`, `isAnalyzing`, `isSimulating`, `isUploading`, `uploadProgress`, `analyzeError`, `simulateError`. | State Management: Zustand for UI state; F-05: user field | Store importable; initial state is nulls |
+| `[ ]` | **3.1.6** Define all TypeScript interfaces in `frontend/lib/types.ts`: `ClerkUser`, `UploadResult`, `Column`, `InsightResult`, `DriverResult`, `DecisionTrace`, `SimulationResult`, `ImpactResult`. All must be `readonly` where applicable. | TypeScript: all API responses explicitly typed | All interfaces compile; no `any` |
+| `[ ]` | **3.1.7** Wrap `app/layout.tsx` with `QueryClientProvider` (React Query) and `<ClerkProvider>` (Clerk). | State Management: React Query for server state; Auth: Clerk provider | Both providers wrap the app |
 
 ---
 
@@ -267,7 +322,7 @@ The backend is built first so that the statistical core can be tested and valida
 | `[ ]` | **3.2.4** Implement **Solution section**: three capability tiles — (1) "Ask Anything" (natural language), (2) "Auto Statistical Modeling" (AI selects OLS or PLS-SEM), (3) "Simulate Decisions" (slider → instant forecast). | PRD §2 Solution | Section renders correctly |
 | `[ ]` | **3.2.5** Implement **How It Works section**: 5-step numbered flow — Upload data → Ask a question → AI selects model → Get insight → Simulate changes. Animate steps with Framer Motion stagger. | PRD §8 How It Works | Steps render with stagger animation |
 | `[ ]` | **3.2.6** Implement **vs. Competitors section**: side-by-side comparison table — SOTA StatWorks vs. SPSS vs. SmartPLS vs. Generic AI. Highlight green checkmarks for SOTA StatWorks wins. | PRD §5 Differentiation | Table renders; mobile-readable |
-| `[ ]` | **3.2.7** Implement **Tech Stack section** (for technical judges): logos/badges for FastAPI, Next.js, OpenAI `gpt-5.4-mini` + `gpt-5.4`, numpy/scipy, Vercel, Render. Brief one-line description per item. | SD §3 Tech Stack | Section renders without broken images |
+| `[ ]` | **3.2.7** Implement **Tech Stack section** (for technical judges): logos/badges for FastAPI, Next.js, OpenAI `gpt-5.4-mini` + `gpt-5.4`, numpy/scipy, Vercel, Render, Clerk, Supabase, Cloudflare R2. Brief one-line description per item. | SD §3 Tech Stack | Section renders without broken images |
 | `[ ]` | **3.2.8** Implement **Team section**: team name "Phú Nhuận Builder x SOTA Works". Include project name, hackathon context. | PRD header: team name | Section renders |
 | `[ ]` | **3.2.9** Implement **Footer**: repeat `"🚀 Launch to App"` CTA, tagline, team name. | Landing page completeness | Second CTA navigates to `/app` |
 | `[ ]` | **3.2.10** Apply polished visual design: dark or deep-blue background, gradient headline text, card hover effects, smooth scroll between sections. Use Google Font (Inter or Outfit) via `next/font`. | PRD design: wow first impression | Lighthouse Performance ≥80; no layout shift |
@@ -355,7 +410,7 @@ The backend is built first so that the statistical core can be tested and valida
 | # | Task | Rule | Acceptance |
 |---|---|---|---|
 | `[ ]` | **3.9.1** Connect the GitHub repository to a new Vercel project via the Vercel dashboard (no CLI). Set Root Directory to `frontend/`. | Git & Deployment: no Vercel CLI | Vercel dashboard shows project |
-| `[ ]` | **3.9.2** Set `NEXT_PUBLIC_BACKEND_URL` in Vercel project settings to the live Render.com backend URL. | Git & Deployment; API Layer: env var required | Environment variable saved in Vercel |
+| `[ ]` | **3.9.2** Set `NEXT_PUBLIC_BACKEND_URL` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` in Vercel project settings to the live Render.com backend URL and Clerk publishable key. | Git & Deployment; API Layer: env var required; Auth: Clerk key | Environment variables saved in Vercel |
 | `[ ]` | **3.9.3** Push to `main` and verify automatic Vercel deploy succeeds. | Git & Deployment: git push only | Vercel deployment log shows success |
 | `[ ]` | **3.9.4** Lock CORS on the backend: update Render env var `CORS_ORIGIN` to the exact Vercel deployment URL. Restart Render service. | Security: CORS locked before demo | `/analyze` from Vercel URL succeeds; `/analyze` from random origin fails |
 | `[ ]` | **3.9.5** Run the full end-to-end demo on the live Vercel + Render setup. Upload demo dataset → ask a question → read insight → simulate → confirm result badge animates. | Full system integration | No errors; demo flow completes in ≤60s |
@@ -388,7 +443,8 @@ The backend is built first so that the statistical core can be tested and valida
 | Phase | Estimated Hours | Key Risk |
 |---|---|---|
 | Phase 1 — Backend Core | 8–10h | PLS engine stability; bootstrap performance on Render |
+| Phase 1.5 — Infrastructure Services | 3–4h | Supabase/R2/Clerk account setup; presigned URL debugging |
 | Phase 2 — AI / LLM Integration | 4–5h | Prompt token budget; LLM latency on free tier |
-| Phase 3 — Frontend | 8–10h | Animation timing; CORS lockdown; Vercel env var setup |
+| Phase 3 — Frontend | 8–10h | Animation timing; CORS lockdown; Vercel env var setup; Clerk UI integration |
 | Phase 4 — Pre-Demo | 1–2h | Render cold-start; API key rotation |
-| **Total** | **21–27h** | Within 20–30h PRD constraint |
+| **Total** | **24–31h** | Within 20–30h PRD constraint (slight stretch) |

@@ -24,11 +24,11 @@ It serves business analysts, product managers, marketers, and students who need 
 | Principle | Why it matters for this system |
 |---|---|
 | **Decisions over data** | Every API response must terminate in a human-readable recommendation. Returning raw numbers without interpretation is a failure mode. |
-| **Stateless by default** | No database, no session store. Each request carries all needed context. Eliminates deployment complexity and lets the free Render.com tier handle the load. |
+| **Stateful-lite by default** | In-memory state serves as a fast cache layer. Persistent metadata lives in Supabase; raw files live in Cloudflare R2. Users can reload or return and resume their session without re-uploading. See ADR-0002, ADR-0003. |
 | **Fail gracefully, never crash** | Free-tier LLMs produce malformed output unpredictably. The system must always return a valid response — degraded if necessary — via a layered fallback chain. |
 | **Latency budget is a hard constraint** | The PRD sets < 2s for `/analyze`. Every design decision (bootstrap cap, token cap, in-process computation) must be evaluated against this budget first. |
 | **LLM is an orchestrator, not the brain** | LLM handles parsing and narrative. Statistical truth comes from deterministic code (`numpy`, `scipy`). This separation prevents hallucination from corrupting quantitative output. |
-| **Minimal surface area** | Three endpoints, one screen. Each additional endpoint or page increases demo failure risk within the 20–30h build window. |
+| **Decouple identity from computation** | Auth (Clerk) handles login and user identity only. It never touches the statistical engine or LLM layer. The backend extracts `clerk_user_id` from request headers — no Clerk SDK needed server-side. See ADR-0001. |
 
 ---
 
@@ -55,6 +55,9 @@ It serves business analysts, product managers, marketers, and students who need 
 | **Backend hosting** | Render.com (free tier) | Web Service; Python; cold-start latency ~30s (acceptable if pre-warmed before demo) |
 | **Frontend hosting** | Vercel (hobby tier) | Deployed via GitHub push; no Vercel CLI required |
 | **Async queue (optional)** | Celery + Redis | Only added if bootstrap > 200 samples is needed and blocks the 2s budget |
+| **Authentication** | Clerk | OAuth provider (Google login); prebuilt UI components; session management offloaded from backend. Free tier: 10K MAU. See ADR-0001 |
+| **Metadata DB** | Supabase (PostgreSQL) | Managed Postgres; `supabase-py` for backend; RLS-capable; JSONB for analysis results. Free tier: 500 MB. See ADR-0002 |
+| **Object storage** | Cloudflare R2 | S3-compatible; zero egress fees; `boto3` SDK; presigned URL upload/download. Free tier: 10 GB. See ADR-0003 |
 
 ---
 
@@ -65,21 +68,30 @@ It serves business analysts, product managers, marketers, and students who need 
 ```mermaid
 graph TD
     Browser["Browser\n(Next.js on Vercel)"]
+    Clerk["Clerk\n(Auth Provider)"]
 
     subgraph Render ["Render.com — FastAPI Backend"]
         API["API Gateway\nFastAPI router"]
+        AuthCtx["Auth Context\nExtract clerk_user_id"]
         Ingest["Data Ingestion Layer\npandas · openpyxl · python-docx · python-pptx"]
         AILayer["AI Layer\nIntent Parser · Variable Extractor · Insight Generator"]
         Router["Decision Router\nScoring function: PLS vs Regression"]
         RegEngine["Regression Engine\nOLS · numpy · scipy"]
         PLSEngine["PLS Engine\nLatent vars · path coef · bootstrap"]
         SimEngine["Simulation Engine\nDirected graph · DFS propagation"]
+        R2Client["R2 Client\nboto3 · presigned URLs"]
+        SupaClient["Supabase Client\nsupabase-py · metadata CRUD"]
     end
 
     OpenAI["OpenAI API\ngpt-5.4-mini (Call 1) · gpt-5.4 (Call 2)"]
+    R2["Cloudflare R2\nObject Storage"]
+    Supabase["Supabase\nPostgreSQL"]
 
-    Browser -->|"POST /upload\nPOST /analyze\nPOST /simulate"| API
-    API --> Ingest
+    Browser -->|"Login"| Clerk
+    Clerk -->|"user_id"| Browser
+    Browser -->|"POST /upload\nPOST /analyze\nPOST /simulate\nx-clerk-user-id header"| API
+    API --> AuthCtx
+    AuthCtx --> Ingest
     Ingest --> AILayer
     AILayer -->|"LLM call 1 — parse intent"| OpenAI
     OpenAI -->|"structured JSON"| AILayer
@@ -92,6 +104,10 @@ graph TD
     AILayer -->|"LLM call 2 — generate insight"| OpenAI
     OpenAI -->|"narrative text"| AILayer
     AILayer -->|"JSON response"| Browser
+    R2Client -->|"upload/download"| R2
+    SupaClient -->|"metadata CRUD"| Supabase
+    Ingest --> R2Client
+    Ingest --> SupaClient
 ```
 
 ### 4.2 Request Lifecycle — `/analyze`
@@ -99,7 +115,7 @@ graph TD
 ```
 POST /analyze  { query: string, file_id: string }
 │
-├─ 1. Retrieve parsed dataset from in-memory store (file_id → DataFrame)
+├─ 1. Retrieve parsed dataset: check in-memory cache first, then fetch from R2 via Supabase metadata
 ├─ 2. AI Layer — LLM call 1: intent + variable extraction
 │      • system prompt: strict JSON schema
 │      • user prompt: column names + query
@@ -125,6 +141,7 @@ POST /analyze  { query: string, file_id: string }
 │
 └─ 7. Return response
        { summary, drivers[{name, coef, p}], r2, recommendation, model_type }
+       → Persist analysis result to Supabase (async, non-blocking)
 ```
 
 ### 4.3 Request Lifecycle — `/simulate`
@@ -173,6 +190,9 @@ POST /simulate  { variable: string, delta: float, file_id: string }
 |---|---|---|
 | **OpenAI API (`gpt-5.4-mini`)** | LLM Call 1: intent classification and variable extraction (JSON mode + function calling); released March 17, 2026; 400K context window | Retry ×2 with 500ms backoff → if still failing, fallback: auto-detect features, template-generated summary string |
 | **OpenAI API (`gpt-5.4`)** | LLM Call 2: business-language insight and recommendation generation; released March 5, 2026; up to 1.05M context; frontier reasoning model | Retry ×2 with 500ms backoff → if still failing, use template: `"{top_driver} shows the strongest relationship with {target} (β={coef:.2f})."` |
+| **Clerk** | Authentication (Google OAuth), session management, user identity | Clerk is external; if unreachable, frontend shows "Login unavailable" message. Backend can still function without auth for anonymous demo mode. |
+| **Supabase** | PostgreSQL metadata persistence (users, datasets, analyses) | If unreachable, backend falls back to in-memory-only mode (stateless, no persistence). Analysis still works; data is not persisted. |
+| **Cloudflare R2** | Object storage for dataset files and analysis output | If unreachable, backend falls back to in-memory-only storage. Upload still works locally; data is not persisted to R2. |
 | **Render.com (free tier)** | Backend hosting | Cold start ~30s after inactivity; pre-warm by hitting `/health` before demo. Free tier has 512 MB RAM — keep DataFrame in-memory, not persisted |
 | **Vercel (hobby tier)** | Frontend hosting | Deployed automatically on push to `main` branch; no CLI required. Serverless functions not used (all compute is on Render backend) |
 
@@ -182,14 +202,20 @@ POST /simulate  { variable: string, delta: float, file_id: string }
 
 ### 6.1 Security
 
-**Assumptions:**
-- No authentication layer. The system is stateless and demo-only; any user with the URL can upload data and query.
-- Data uploaded to the backend is not persisted to disk. The parsed `DataFrame` is held in a Python process-level in-memory dict keyed by `file_id` (a UUID). It is lost on process restart.
+**Authentication — Clerk:**
+- Users authenticate via Clerk (Google OAuth). The frontend wraps the app with `<ClerkProvider>` and uses `useUser()` to get the current user.
+- All API requests from the frontend include the `x-clerk-user-id` header extracted from the Clerk session.
+- The backend extracts `clerk_user_id` from the request header in `auth/context.py`. No Clerk SDK is used on the backend.
+- `CLERK_SECRET_KEY` is stored as an environment variable on Render (if JWT verification is needed). `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` is set in Vercel.
 
-**Known gaps:**
-- No input size limit enforced at the HTTP layer (only application-level validation). A large file upload could exhaust Render's 512 MB RAM.
-- `file_id` is not validated for ownership — any client knowing a `file_id` UUID can query against it. Acceptable for demo; not acceptable for production.
-- OpenAI API keys (one per account, 4 accounts total) are stored as environment variables (`OPENAI_API_KEY_1` through `OPENAI_API_KEY_4`). Must not be committed to source control. Active key is rotated if rate-limited.
+**Data access:**
+- Supabase Row Level Security (RLS) can restrict users to access only their own datasets and analyses. For v1 demo, RLS is optional but recommended.
+- Cloudflare R2 buckets are private. All access is via time-limited presigned URLs generated by the backend. No public bucket access.
+
+**API keys:**
+- OpenAI API keys (`OPENAI_API_KEY_1` through `OPENAI_API_KEY_4`) are stored as environment variables. Must not be committed to source control.
+- Supabase keys (`SUPABASE_URL`, `SUPABASE_SERVICE_KEY`) are stored as environment variables on Render.
+- R2 keys (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`) are stored as environment variables on Render.
 
 **Controls in place:**
 - CORS restricted to the Vercel frontend origin (configured in FastAPI middleware).
@@ -198,10 +224,39 @@ POST /simulate  { variable: string, delta: float, file_id: string }
 
 ### 6.2 Data Architecture
 
-- **Primary storage:** In-process Python `dict` (`file_id → DataFrame`). No external store.
-- **Lifecycle:** DataFrame is created on `POST /upload`, read on `POST /analyze` and `POST /simulate`. It expires when the Render process restarts (no TTL mechanism in v1).
-- **Context files (`.docx`, `.pptx`):** Text is extracted at upload time and appended to the LLM prompt as plain string context. Not stored separately.
-- **Coefficient cache:** After `/analyze`, the computed path coefficient map is stored alongside the DataFrame under the same `file_id`. This allows `/simulate` to skip re-running the statistical model.
+**Three-layer storage model:**
+
+| Layer | Technology | Purpose |
+|---|---|---|
+| **In-memory cache** | Python `OrderedDict` | Fast access to the latest dataset DataFrame and coefficient cache. LRU eviction at 10 entries. |
+| **Metadata store** | Supabase (PostgreSQL) | Persistent metadata: user records, dataset references, analysis results (JSONB). Survives process restarts. |
+| **Object store** | Cloudflare R2 | Raw dataset files (.csv, .xlsx) and analysis output (.json). Accessed via presigned URLs. |
+
+**Supabase tables:**
+
+| Table | Columns | Purpose |
+|---|---|---|
+| `users` | `id uuid`, `clerk_user_id text`, `email text`, `name text` | Identity mapping (Clerk ↔ DB) |
+| `datasets` | `id uuid`, `user_id uuid`, `file_name text`, `r2_key text`, `created_at timestamp` | Dataset metadata |
+| `analyses` | `id uuid`, `dataset_id uuid`, `result jsonb`, `created_at timestamp` | Analysis result persistence |
+
+**R2 bucket structure:**
+
+```
+bucket/
+  users/
+    {clerk_user_id}/
+      datasets/
+        {dataset_id}.csv
+      outputs/
+        {analysis_id}.json
+```
+
+**Lifecycle:**
+- Upload: Frontend requests presigned URL from backend → uploads file directly to R2 → backend stores metadata in Supabase → caches DataFrame in memory.
+- Analyze: Backend checks in-memory cache first. If not cached, fetches file from R2, parses it, caches it. Runs analysis. Stores result in Supabase.
+- Simulate: Reads coefficient cache from memory (stored by `/analyze`). No R2 or Supabase access needed.
+- Context files (`.docx`, `.pptx`): Text is extracted at upload time and appended to the LLM prompt as plain string context. Also stored in Supabase as part of dataset metadata.
 
 ### 6.3 Performance and Scalability
 
@@ -249,7 +304,7 @@ LLM calls use retry ×2 with 500ms backoff before triggering Layer 1 fallback.
 |---|---|
 | **Backend on Render.com free tier** | 512 MB RAM ceiling → no large matrix ops; no persistent disk; cold-start requires pre-warming |
 | **Frontend on Vercel, no CLI** | Deployment exclusively via `git push` to `main`; no server-side compute on Vercel; all API calls proxied to Render |
-| **No database** | All state is ephemeral in-process; `file_id` is the only key; no user sessions |
+| **Persistence layer** | Supabase for metadata, Cloudflare R2 for files. In-memory store is cache-only. Fallback to in-memory-only mode if external services are unreachable. |
 | **Free LLM (OpenRouter)** | Rate limits apply; structured output is not guaranteed; validation layer and fallback chain are load-bearing |
 | **≤ 2 LLM calls per `/analyze` request** | Prohibits chain-of-thought or multi-step reasoning via LLM; all branching logic must live in deterministic Python code |
 | **< 2s response for `/analyze`** | Bootstrap ≤ 200 samples; no async queue for v1; no heavy pre-processing |
@@ -274,6 +329,15 @@ SPSS-style OLS is universally understood and fast. PLS-SEM handles latent variab
 **Why Vercel for frontend with no CLI?**
 Vercel's GitHub integration is zero-configuration. Connecting the repo and pushing to `main` is the entire deployment workflow. The Vercel CLI adds no value here and introduces a setup step that can fail during a hackathon.
 
+**Why Clerk for authentication?**
+Clerk provides prebuilt UI components, native Google OAuth, and session management that offloads all auth logic from the backend. For a 20–30h build window, it saves 3–4 hours compared to rolling custom auth. See ADR-0001 for full rationale and alternatives.
+
+**Why Supabase for metadata?**
+Render's ephemeral filesystem prevents SQLite from persisting data. Supabase provides a managed PostgreSQL instance with a generous free tier (500 MB), a Python SDK, and JSONB for storing analysis results. See ADR-0002.
+
+**Why Cloudflare R2 for object storage?**
+Zero egress fees, S3-compatible API (uses `boto3`), and 10 GB free storage. Superior to S3 for a product that repeatedly downloads datasets for reanalysis. See ADR-0003.
+
 ---
 
 ## 9. Open Points
@@ -295,5 +359,37 @@ Vercel's GitHub integration is zero-configuration. Connecting the repo and pushi
 |---|---|---|
 | **Product Requirements** | `.docs/01-prd.md` | `draft` |
 | **Codebase Summary** | `.docs/03-codebase-summary.md` | Not yet created |
-| **ADRs** | `.docs/adrs/` | Not yet created |
 | **Feature Specs** | `.docs/03-features-spec.md` | `draft` |
+| **ADR-0001** | `docs/adrs/0001-clerk-authentication.md` | `proposed` |
+| **ADR-0002** | `docs/adrs/0002-supabase-metadata.md` | `proposed` |
+| **ADR-0003** | `docs/adrs/0003-cloudflare-r2-storage.md` | `proposed` |
+
+---
+
+## 11. Updated Architecture Summary
+
+```text
+[Frontend]
+Next.js + Clerk (@clerk/nextjs)
+    ↓
+[Auth]
+Clerk (Google OAuth, session management)
+    ↓
+[Backend]
+FastAPI (statistical engine + AI + orchestration)
+    ↓
+[Storage Layer]
+- Supabase (PostgreSQL — metadata: users, datasets, analyses)
+- Cloudflare R2 (object storage — raw files, presigned URLs)
+- In-memory cache (fast access to latest DataFrame + coefficients)
+```
+
+### System Boundary Summary
+
+| Component | Handles | Does NOT handle |
+|---|---|---|
+| **Clerk** | Login, user identity, session tokens | Data, analysis, storage |
+| **Supabase** | User records, dataset metadata, analysis results | Raw files, computation |
+| **Cloudflare R2** | Raw dataset files, analysis output files | Metadata, identity, computation |
+| **FastAPI Backend** | Statistical computation, LLM orchestration, API routing | Auth UI, file hosting |
+| **In-memory cache** | Fast DataFrame access, coefficient cache | Persistence (cache-only) |

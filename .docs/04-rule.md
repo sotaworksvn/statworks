@@ -29,6 +29,9 @@
 | [React / Next.js — State Management](#react--nextjs--state-management) | Frontend | Zustand + React Query rules |
 | [React / Next.js — API Layer](#react--nextjs--api-layer) | Frontend | Backend communication rules |
 | [React / Next.js — UX & Animation](#react--nextjs--ux--animation) | Frontend | Insight rendering, animation, jargon |
+| [Common — Authentication (Clerk)](#common--authentication-clerk) | Applies everywhere | Clerk integration, JWT, header rules |
+| [Common — Storage (Cloudflare R2)](#common--storage-cloudflare-r2) | Backend + Frontend | Presigned URLs, bucket access, SDK |
+| [Common — Metadata (Supabase)](#common--metadata-supabase) | Backend | Supabase client, tables, async writes |
 
 ---
 
@@ -40,9 +43,9 @@
 
 ---
 
-### Rule: Three endpoints only
+### Rule: Three core endpoints plus infrastructure endpoints
 
-**What:** The backend exposes exactly three HTTP endpoints in v1: `POST /upload`, `POST /analyze`, `POST /simulate`. Do not add new endpoints without explicit scope change in the PRD.
+**What:** The backend exposes three core computation endpoints: `POST /upload`, `POST /analyze`, `POST /simulate`. Additionally, the following infrastructure endpoints are permitted: `GET /health`, `POST /upload/presign` (R2 presigned URL generation), `GET /datasets` (user dataset listing). Do not add new computation endpoints without explicit scope change in the PRD.
 
 **Why:** Minimal surface area reduces demo failure risk within the 20–30h build window. Every new endpoint needs error handling, documentation, and testing.
 
@@ -162,9 +165,13 @@ for attempt in range(3):
 
 ---
 
-### Rule: All API keys go in environment variables — never in source code
+### Rule: All API keys and service credentials go in environment variables — never in source code
 
-**What:** OpenAI API keys (`OPENAI_API_KEY_1` through `OPENAI_API_KEY_4`) MUST be read from environment variables at runtime. Never hardcode a key string in any Python file, `.env` file committed to git, or frontend code.
+**What:** The following credentials MUST be read from environment variables at runtime. Never hardcode any of these in Python files, `.env` files committed to git, or frontend code:
+- OpenAI: `OPENAI_API_KEY_1` through `OPENAI_API_KEY_4`
+- Clerk: `CLERK_SECRET_KEY` (backend), `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` (frontend)
+- Supabase: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`
+- R2: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`
 
 **Why:** Committing secrets to git exposes them permanently, even after deletion. Render.com and Vercel both support environment variable injection at the platform level.
 
@@ -277,7 +284,7 @@ file_store[file_id] = entry
 
 ### Rule: Backend environment variables are set in Render's dashboard — never in `.env` files committed to git
 
-**What:** All backend secrets (`OPENAI_API_KEY_*`) and config (`CORS_ORIGIN`) are injected via the Render.com environment variable panel. A `.env` file may exist locally for development but MUST be in `.gitignore`.
+**What:** All backend secrets (`OPENAI_API_KEY_*`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `R2_*`, `CLERK_SECRET_KEY`) and config (`CORS_ORIGIN`) are injected via the Render.com environment variable panel. A `.env` file may exist locally for development but MUST be in `.gitignore`.
 
 **Why:** Committed `.env` files expose secrets in git history and defeat the purpose of secret management.
 
@@ -729,3 +736,140 @@ Use Framer Motion `initial={{ opacity: 0 }}` + `animate={{ opacity: 1 }}` with `
 | Python / Data Ingestion | `.docs/03-features-spec.md` F-01 |
 | TypeScript / React / Next.js | `.docs/02-system-design.md` §3; `.docs/03-features-spec.md` F-04 |
 | UX & Animation | `.docs/01-prd.md` §4; `.docs/03-features-spec.md` F-04 §2 |
+| Authentication (Clerk) | `.docs/02-system-design.md` §6.1; `.docs/03-features-spec.md` F-05; ADR-0001 |
+| Storage (R2) | `.docs/02-system-design.md` §6.2; `.docs/03-features-spec.md` F-05; ADR-0003 |
+| Metadata (Supabase) | `.docs/02-system-design.md` §6.2; `.docs/03-features-spec.md` F-05; ADR-0002 |
+
+---
+
+---
+
+## Common — Authentication (Clerk)
+
+**Source:** System Design §6.1, Feature Spec F-05, ADR-0001
+
+---
+
+### Rule: Backend extracts `clerk_user_id` from request header — no Clerk SDK on backend
+
+**What:** The backend MUST extract the user identity from the `x-clerk-user-id` request header using a thin helper function in `auth/context.py`. Do not install or import any Clerk SDK package in the backend. The Clerk SDK is frontend-only (`@clerk/nextjs`).
+
+```python
+# ✅ Correct
+def get_current_user_id(request: Request) -> str | None:
+    return request.headers.get("x-clerk-user-id")
+
+# ❌ Wrong
+from clerk_backend_api import Clerk  # do not use
+```
+
+**Why:** The backend does not need Clerk's SDK. Adding it introduces an unnecessary dependency, increases attack surface, and couples the backend to Clerk's versioning. Header extraction is sufficient for identity.
+
+---
+
+### Rule: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` is the only Clerk key in frontend code
+
+**What:** The frontend MUST only use `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` (prefixed with `pk_`). The `CLERK_SECRET_KEY` (prefixed with `sk_`) MUST NEVER appear in frontend code, client-side bundles, or any file under `frontend/`.
+
+**Why:** Clerk's secret key has full account access. Exposing it in a client-side bundle compromises all user sessions.
+
+---
+
+### Rule: Auth is optional — the app must work without Clerk
+
+**What:** If `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` is not set or Clerk is unreachable, the frontend MUST still render the app in anonymous mode (no login, no "Welcome" message). The backend MUST treat a missing `x-clerk-user-id` header as an anonymous request and proceed with in-memory-only mode.
+
+**Why:** The demo must work even if Clerk is down. Auth adds persistence and personalisation, not core functionality.
+
+---
+
+---
+
+## Common — Storage (Cloudflare R2)
+
+**Source:** System Design §6.2, Feature Spec F-05, ADR-0003
+
+---
+
+### Rule: All R2 access uses presigned URLs — never direct bucket access
+
+**What:** Every upload to and download from R2 MUST use a time-limited presigned URL generated by the backend via `boto3`. The R2 bucket MUST NOT have public access enabled. Frontend code MUST NOT contain R2 credentials.
+
+```python
+# ✅ Correct
+def generate_presigned_upload_url(key: str, expires_in: int = 3600) -> str:
+    return s3_client.generate_presigned_url(
+        "put_object", Params={"Bucket": BUCKET, "Key": key}, ExpiresIn=expires_in
+    )
+```
+
+**Why:** Public bucket access allows anyone to read or overwrite user data. Presigned URLs are time-limited, scoped to a specific key, and revoke automatically.
+
+---
+
+### Rule: R2 keys follow canonical path structure
+
+**What:** All objects stored in R2 MUST follow this naming convention:
+- Datasets: `users/{clerk_user_id}/datasets/{dataset_id}.csv`
+- Outputs: `users/{clerk_user_id}/outputs/{analysis_id}.json`
+
+Never store files at the bucket root or with flat naming.
+
+**Why:** Structured paths enable per-user cleanup, debugging, and future RLS-style access control at the storage layer.
+
+---
+
+### Rule: Use `boto3` with S3-compatible endpoint — never Cloudflare-specific SDKs
+
+**What:** The R2 client in `storage/r2.py` MUST use `boto3` configured with `endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"`. Do not use any Cloudflare-specific SDK.
+
+**Why:** `boto3` is the standard S3 SDK. Using it ensures the storage layer can be migrated to AWS S3 or MinIO without code changes.
+
+---
+
+---
+
+## Common — Metadata (Supabase)
+
+**Source:** System Design §6.2, Feature Spec F-05, ADR-0002
+
+---
+
+### Rule: Supabase writes are async and non-blocking
+
+**What:** All Supabase insert/update operations (user upsert, dataset metadata, analysis result) MUST be dispatched asynchronously. The main request handler MUST NOT `await` Supabase writes in the critical path of `/analyze`. Use `asyncio.create_task()` or fire-and-forget pattern.
+
+**Why:** The < 2s latency budget for `/analyze` is already tight. Adding a synchronous 100–300ms Supabase roundtrip would push the total over budget.
+
+---
+
+### Rule: Use `supabase-py` client — never raw HTTP to the Supabase REST API
+
+**What:** All Supabase interactions MUST use the `supabase-py` Python client. Do not use `requests` or `httpx` directly against the Supabase PostgREST API.
+
+```python
+# ✅ Correct
+from supabase import create_client
+supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+# ❌ Wrong
+requests.post(f"{SUPABASE_URL}/rest/v1/users", ...)
+```
+
+**Why:** The official client handles authentication headers, error formatting, and type serialisation. Raw HTTP calls bypass all of this.
+
+---
+
+### Rule: `SUPABASE_SERVICE_KEY` is backend-only — never in frontend code
+
+**What:** The Supabase service key (`service_role` key) MUST only be used in the backend (`backend/db/supabase.py`). It MUST NEVER appear in frontend code, `NEXT_PUBLIC_*` env vars, or client-side bundles. The frontend communicates with Supabase only through the backend API.
+
+**Why:** The service key bypasses Row Level Security. Exposing it in the frontend allows any user to read/write all data in all tables.
+
+---
+
+### Rule: Supabase is optional — fall back to in-memory if unreachable
+
+**What:** If `SUPABASE_URL` or `SUPABASE_SERVICE_KEY` is not set, or if the Supabase client raises a connection error, the backend MUST fall back gracefully to in-memory-only mode. Log a warning but do not crash.
+
+**Why:** Core statistical functionality must never depend on an external metadata store. Supabase adds persistence, not capability.

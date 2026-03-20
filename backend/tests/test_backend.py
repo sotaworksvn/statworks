@@ -562,6 +562,245 @@ def test_e2e_flow():
 
 
 # ===================================================
+# 14. AUTH CONTEXT
+# ===================================================
+def test_auth_context():
+    print("\n=== 14. Auth Context — get_current_user_id ===")
+    from backend.auth.context import get_current_user_id
+    from starlette.testclient import TestClient as _  # ensure starlette available
+
+    # 14a. With valid header
+    from fastapi import Request
+    from starlette.datastructures import Headers
+
+    # Use the test client to make a real request with the header
+    r = client.get("/health", headers={"x-clerk-user-id": "user_abc123"})
+    report("Health with x-clerk-user-id → 200 (header ignored by health)", r.status_code == 200)
+
+    # 14b. Test the function directly via a mock scope
+    scope = {
+        "type": "http",
+        "headers": [(b"x-clerk-user-id", b"user_test_42")],
+    }
+    mock_request = Request(scope)
+    uid = get_current_user_id(mock_request)
+    report("get_current_user_id with header → 'user_test_42'", uid == "user_test_42")
+
+    # 14c. Without header
+    scope_empty = {"type": "http", "headers": []}
+    mock_request_empty = Request(scope_empty)
+    uid_empty = get_current_user_id(mock_request_empty)
+    report("get_current_user_id without header → None", uid_empty is None)
+
+    # 14d. Empty string header
+    scope_blank = {
+        "type": "http",
+        "headers": [(b"x-clerk-user-id", b"")],
+    }
+    mock_request_blank = Request(scope_blank)
+    uid_blank = get_current_user_id(mock_request_blank)
+    report("get_current_user_id with empty header → None", uid_blank is None)
+
+
+# ===================================================
+# 15. R2 MODULE
+# ===================================================
+def test_r2_module():
+    print("\n=== 15. R2 Module — helper functions ===")
+    from backend.storage import r2
+
+    # 15a. Key generation
+    key = r2.make_dataset_key("clerk_123", "dataset_456", ".csv")
+    report("make_dataset_key format", key == "users/clerk_123/datasets/dataset_456.csv")
+
+    key_xlsx = r2.make_dataset_key("clerk_123", "dataset_789", ".xlsx")
+    report("make_dataset_key .xlsx", key_xlsx == "users/clerk_123/datasets/dataset_789.xlsx")
+
+    # 15b. Output key
+    out_key = r2.make_output_key("clerk_123", "analysis_001")
+    report("make_output_key format", out_key == "users/clerk_123/outputs/analysis_001.json")
+
+    # 15c. is_available (likely False in test env without R2 env vars)
+    avail = r2.is_available()
+    report("is_available returns bool", isinstance(avail, bool))
+
+    # 15d. Presigned URL when not available
+    if not avail:
+        url = r2.generate_presigned_upload_url("test/key.csv")
+        report("generate_presigned_upload_url when unavailable → None", url is None)
+
+        url2 = r2.generate_presigned_download_url("test/key.csv")
+        report("generate_presigned_download_url when unavailable → None", url2 is None)
+
+        success = r2.upload_file_bytes("test/key.csv", b"data", "text/csv")
+        report("upload_file_bytes when unavailable → False", success is False)
+
+        stream = r2.get_file_stream("test/key.csv")
+        report("get_file_stream when unavailable → None", stream is None)
+
+
+# ===================================================
+# 16. SUPABASE MODULE
+# ===================================================
+def test_supabase_module():
+    print("\n=== 16. Supabase Module — graceful degradation ===")
+    from backend.db import supabase as supa
+
+    # 16a. is_available
+    avail = supa.is_available()
+    report("is_available returns bool", isinstance(avail, bool))
+
+    # 16b. All functions return safe defaults when unavailable
+    if not avail:
+        result = supa.upsert_user("test_clerk_id")
+        report("upsert_user when unavailable → None", result is None)
+
+        result2 = supa.create_dataset("uid", "file.csv", "r2/key")
+        report("create_dataset when unavailable → None", result2 is None)
+
+        result3 = supa.create_analysis("did", {"test": True})
+        report("create_analysis when unavailable → None", result3 is None)
+
+        result4 = supa.get_user_datasets("clerk_id")
+        report("get_user_datasets when unavailable → []", result4 == [])
+
+        result5 = supa.get_user_by_clerk_id("clerk_id")
+        report("get_user_by_clerk_id when unavailable → None", result5 is None)
+
+
+# ===================================================
+# 17. UPLOAD PRESIGN ENDPOINT
+# ===================================================
+def test_upload_presign():
+    print("\n=== 17. POST /upload/presign — Auth + R2 checks ===")
+
+    # 17a. No auth header → 401
+    r = client.post("/upload/presign", json={"file_name": "data.csv"})
+    report("Presign without auth → 401", r.status_code == 401)
+    report("401 has detail", "detail" in r.json())
+
+    # 17b. With auth but R2 not configured → 503
+    from backend.storage import r2
+    if not r2.is_available():
+        r = client.post(
+            "/upload/presign",
+            json={"file_name": "data.csv"},
+            headers={"x-clerk-user-id": "user_test"},
+        )
+        report("Presign with auth, R2 unavailable → 503", r.status_code == 503)
+
+    # 17c. Missing file_name → 422
+    r = client.post(
+        "/upload/presign",
+        json={},
+        headers={"x-clerk-user-id": "user_test"},
+    )
+    report("Presign missing file_name → 422", r.status_code == 422)
+
+    # 17d. Empty body → 422
+    r = client.post(
+        "/upload/presign",
+        content=b"{}",
+        headers={"x-clerk-user-id": "user_test", "content-type": "application/json"},
+    )
+    report("Presign empty body → 422", r.status_code == 422)
+
+
+# ===================================================
+# 18. DATASETS ENDPOINT
+# ===================================================
+def test_datasets_endpoint():
+    print("\n=== 18. GET /datasets — Auth + listing ===")
+
+    # 18a. No auth header → 401
+    r = client.get("/datasets")
+    report("GET /datasets without auth → 401", r.status_code == 401)
+    report("401 has detail", "detail" in r.json())
+
+    # 18b. With auth → 200 (empty list if Supabase not configured)
+    r = client.get("/datasets", headers={"x-clerk-user-id": "user_test"})
+    report("GET /datasets with auth → 200", r.status_code == 200)
+    body = r.json()
+    report("Response has 'datasets' key", "datasets" in body)
+    report("Datasets is a list", isinstance(body["datasets"], list))
+
+
+# ===================================================
+# 19. UPLOAD WITH AUTH HEADER
+# ===================================================
+def test_upload_with_auth():
+    print("\n=== 19. POST /upload — With x-clerk-user-id ===")
+
+    # 19a. Upload with auth header (should still work and include user context)
+    f = _make_xlsx({"Trust": [1, 2, 3], "Retention": [4, 5, 6]})
+    r = client.post(
+        "/upload",
+        files=[("files", f)],
+        headers={"x-clerk-user-id": "user_auth_test"},
+    )
+    report("Upload with auth → 200", r.status_code == 200)
+    body = r.json()
+    report("Auth upload: has file_id", "file_id" in body)
+    report("Auth upload: has columns", len(body["columns"]) == 2)
+
+    # 19b. Upload without auth (anonymous) → still works
+    f2 = _make_csv({"X": [1, 2], "Y": [3, 4]})
+    r2 = client.post("/upload", files=[("files", f2)])
+    report("Upload without auth (anon) → 200", r2.status_code == 200)
+
+
+# ===================================================
+# 20. FULL AUTHENTICATED E2E FLOW
+# ===================================================
+def test_e2e_authenticated():
+    print("\n=== 20. Full E2E with Auth: Upload → Analyze → Simulate → Datasets ===")
+
+    clerk_id = "e2e_test_user_001"
+    headers = {"x-clerk-user-id": clerk_id}
+
+    # Step 1: Upload with auth
+    rng = np.random.default_rng(777)
+    n = 60
+    data = {
+        "Quality": rng.normal(3.5, 0.8, n),
+        "Service": rng.normal(3.2, 0.9, n),
+        "Location": rng.normal(2.8, 1.0, n),
+    }
+    data["Rating"] = (
+        0.55 * data["Quality"] + 0.30 * data["Service"]
+        + 0.10 * data["Location"] + rng.normal(0, 0.25, n)
+    )
+    f = _make_xlsx(data)
+    r1 = client.post("/upload", files=[("files", f)], headers=headers)
+    report("Auth E2E Step 1: Upload → 200", r1.status_code == 200)
+    fid = r1.json()["file_id"]
+
+    # Step 2: Analyze
+    r2_resp = client.post(
+        "/analyze",
+        json={"file_id": fid, "query": "what drives rating?"},
+    )
+    report("Auth E2E Step 2: Analyze → 200", r2_resp.status_code == 200)
+    insight = r2_resp.json()
+    report("Auth E2E: drivers found", len(insight["drivers"]) > 0)
+    report("Auth E2E: summary non-empty", len(insight["summary"]) > 0)
+
+    # Step 3: Simulate
+    top_var = insight["drivers"][0]["name"]
+    r3 = client.post(
+        "/simulate",
+        json={"file_id": fid, "variable": top_var, "delta": 0.15},
+    )
+    report("Auth E2E Step 3: Simulate → 200", r3.status_code == 200)
+    report("Auth E2E: impacts returned", len(r3.json()["impacts"]) > 0)
+
+    # Step 4: List datasets (may be empty if Supabase not configured)
+    r4 = client.get("/datasets", headers=headers)
+    report("Auth E2E Step 4: Datasets → 200", r4.status_code == 200)
+    report("Auth E2E: datasets response valid", "datasets" in r4.json())
+
+
+# ===================================================
 # RUN ALL
 # ===================================================
 if __name__ == "__main__":
@@ -579,6 +818,13 @@ if __name__ == "__main__":
         test_simulate_edge_cases,
         test_cors,
         test_e2e_flow,
+        test_auth_context,
+        test_r2_module,
+        test_supabase_module,
+        test_upload_presign,
+        test_datasets_endpoint,
+        test_upload_with_auth,
+        test_e2e_authenticated,
     ]
 
     for test_fn in tests:
@@ -603,3 +849,4 @@ if __name__ == "__main__":
                 print(f"  ❌ {name}" + (f" — {detail}" if detail else ""))
 
     sys.exit(1 if FAIL > 0 else 0)
+
