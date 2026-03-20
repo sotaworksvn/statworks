@@ -201,9 +201,9 @@ A hackathon judge logs in via Google, uploads a dataset, reviews insights, then 
 | Development Rules | `.docs/04-rule.md` | `draft` |
 | Task Plan | `.docs/05-tasks-plan.md` | `draft` |
 | Codebase Summary | `.docs/03-codebase-summary.md` | Not yet created |
-| ADR-0001 — Clerk Authentication | `docs/adrs/0001-clerk-authentication.md` | `proposed` |
-| ADR-0002 — Supabase Metadata | `docs/adrs/0002-supabase-metadata.md` | `proposed` |
-| ADR-0003 — Cloudflare R2 Storage | `docs/adrs/0003-cloudflare-r2-storage.md` | `proposed` |
+| ADR-0001 — Clerk Authentication | `.docs/more/adrs/0001-clerk-authentication.md` | `proposed` |
+| ADR-0002 — Supabase Metadata | `.docs/more/adrs/0002-supabase-metadata.md` | `proposed` |
+| ADR-0003 — Cloudflare R2 Storage | `.docs/more/adrs/0003-cloudflare-r2-storage.md` | `proposed` |
 
 ### Downstream Specs
 

@@ -360,9 +360,9 @@ Zero egress fees, S3-compatible API (uses `boto3`), and 10 GB free storage. Supe
 | **Product Requirements** | `.docs/01-prd.md` | `draft` |
 | **Codebase Summary** | `.docs/03-codebase-summary.md` | Not yet created |
 | **Feature Specs** | `.docs/03-features-spec.md` | `draft` |
-| **ADR-0001** | `docs/adrs/0001-clerk-authentication.md` | `proposed` |
-| **ADR-0002** | `docs/adrs/0002-supabase-metadata.md` | `proposed` |
-| **ADR-0003** | `docs/adrs/0003-cloudflare-r2-storage.md` | `proposed` |
+| **ADR-0001** | `.docs/more/adrs/0001-clerk-authentication.md` | `proposed` |
+| **ADR-0002** | `.docs/more/adrs/0002-supabase-metadata.md` | `proposed` |
+| **ADR-0003** | `.docs/more/adrs/0003-cloudflare-r2-storage.md` | `proposed` |
 
 ---
 

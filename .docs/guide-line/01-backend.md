@@ -2,8 +2,9 @@
 
 | Field            | Value                            |
 |------------------|----------------------------------|
-| **Last updated** | 2026-03-20                       |
-| **Stack**        | Python 3.11+ · FastAPI · numpy · pandas |
+| **Last updated** | 2026-03-21                       |
+| **Version**      | 0.2.0                            |
+| **Stack**        | Python 3.11+ · FastAPI · numpy · pandas · supabase · boto3 |
 | **Source**       | `backend/` directory             |
 
 ---
@@ -15,13 +16,13 @@
 cd backend && pip install -e .
 
 # Run dev server (from project root)
-cd .. && DEV_MODE=true python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 
 # Run tests (from project root)
-PYTHONPATH=. DEV_MODE=true python3 backend/tests/test_backend.py
+python -m pytest backend/tests/ -v
 ```
 
-> **Note:** Always start uvicorn from the **project root** (`sota-statworks-pro/`), not from inside `backend/`. The module path `backend.main:app` resolves relative to the working directory.
+> **Note:** `.env` is auto-loaded from `backend/.env` via `python-dotenv`. Copy the template first: `cp backend/.env.example backend/.env`
 
 ---
 
@@ -29,29 +30,39 @@ PYTHONPATH=. DEV_MODE=true python3 backend/tests/test_backend.py
 
 ```
 backend/
-├── pyproject.toml          # Python package config + dependencies
+├── pyproject.toml          # Package config + dependencies
+├── .env.example            # Env var template (safe to commit)
+├── .env                    # Active credentials (gitignored)
 ├── __init__.py
-├── main.py                 # FastAPI app entry point, CORS, /health, router registration
-├── config.py               # Env var reader (API keys, CORS_ORIGIN, DEV_MODE)
+├── main.py                 # FastAPI app, CORS, /health, /datasets, router registration
+├── config.py               # Env var reader + python-dotenv auto-load
 ├── store.py                # In-memory OrderedDict store (LRU, asyncio.Lock)
 ├── models.py               # All Pydantic models (request/response shapes)
-├── upload.py               # POST /upload — file validation, parsing, dtype detection
-├── analyze.py              # POST /analyze — stat engine orchestration + fallback chain
+├── upload.py               # POST /upload, POST /upload/presign
+├── analyze.py              # POST /analyze — stat engine orchestration + Supabase persist
 ├── simulate.py             # POST /simulate — graph DFS propagation
 ├── router.py               # Decision Router (PLS vs regression scoring)
 ├── validation.py           # Validation Layer (sanitises LLM output before engines)
+├── auth/
+│   ├── __init__.py
+│   └── context.py          # get_current_user_id() — Clerk header extraction
+├── db/
+│   ├── __init__.py
+│   └── supabase.py         # Supabase CRUD (users, datasets, analyses)
+├── storage/
+│   ├── __init__.py
+│   └── r2.py               # Cloudflare R2 via boto3 (presigned URLs, upload/download)
 ├── engines/
 │   ├── __init__.py
 │   ├── regression.py       # OLS via np.linalg.lstsq + bootstrap p-values
 │   ├── pls.py              # Simplified PLS (mean-LV) + PLSFallbackError
 │   └── simulation.py       # Directed graph builder + DFS delta propagation
-├── llm/                    # (Phase 2) OpenAI SDK integration
-│   ├── client.py           # AsyncOpenAI clients + key rotation
-│   ├── parser.py           # LLM Call 1: intent parsing (gpt-5.4-mini)
-│   └── insight.py          # LLM Call 2: insight generation (gpt-5.4)
+├── supabase/
+│   └── migrations/         # Supabase CLI migration files
+│       └── 20260320..._create_tables.sql
 └── tests/
     ├── __init__.py
-    └── test_backend.py     # 118-assertion comprehensive test suite
+    └── test_backend.py     # 20 test functions, 143 assertions
 ```
 
 ---
@@ -69,7 +80,7 @@ Health check for uptime monitors and Render pre-warming.
 ---
 
 ### `POST /upload`
-Accepts multipart form-data with one or more files.
+Accepts multipart form-data with one or more files. Persists to R2 + Supabase async if user is authenticated.
 
 **Rules:**
 - Exactly 1 primary file (`.xlsx` or `.csv`) required
@@ -95,8 +106,29 @@ Accepts multipart form-data with one or more files.
 
 ---
 
+### `POST /upload/presign`
+Generate a presigned R2 upload URL for direct frontend upload. **Requires `x-clerk-user-id` header.**
+
+**Request:** `{"file_name": "data.csv"}`
+
+| Status | Condition            |
+|--------|----------------------|
+| `200`  | Success              |
+| `401`  | Missing auth header  |
+| `503`  | R2 not configured    |
+
+**Response (200):**
+```json
+{
+  "upload_url": "https://...r2.cloudflarestorage.com/...",
+  "r2_key": "users/clerk_123/datasets/uuid.csv"
+}
+```
+
+---
+
 ### `POST /analyze`
-Runs statistical analysis on an uploaded dataset.
+Runs statistical analysis on an uploaded dataset. Persists results to Supabase async.
 
 **Request:** `{"file_id": "...", "query": "What affects retention?"}`
 
@@ -116,8 +148,7 @@ Runs statistical analysis on an uploaded dataset.
   "recommendation": "Focus on improving Trust.",
   "model_type": "regression",
   "decision_trace": {
-    "score_pls": 0.21,
-    "score_reg": 0.54,
+    "score_pls": 0.21, "score_reg": 0.54,
     "engine_selected": "regression",
     "reason": "Dataset has fully observable numeric columns."
   }
@@ -137,73 +168,86 @@ Propagates a variable change through the coefficient graph.
 | `404`  | Unknown `file_id`                   |
 | `409`  | `/analyze` not called yet           |
 | `422`  | Invalid variable (lists valid ones) |
-| `500`  | Unexpected server error             |
 
-**Response (200):**
-```json
-{
-  "variable": "Trust",
-  "delta": 0.20,
-  "impacts": [{"variable": "Retention", "delta_pct": 12.4}]
-}
-```
+---
+
+### `GET /datasets`
+Lists all datasets for the authenticated user. **Requires `x-clerk-user-id` header.**
+
+| Status | Condition           |
+|--------|---------------------|
+| `200`  | Success (may be []) |
+| `401`  | Missing auth header |
 
 ---
 
 ## 4. Environment Variables
 
-| Variable             | Required     | Default | Description                       |
-|----------------------|--------------|---------|-----------------------------------|
-| `DEV_MODE`           | No           | `true`  | Skip API key validation in dev    |
-| `CORS_ORIGIN`        | No           | `*`     | Allowed CORS origin               |
-| `OPENAI_API_KEY_1`   | Prod only    | —       | Primary OpenAI key                |
-| `OPENAI_API_KEY_2`   | No           | —       | Fallback key 2                    |
-| `OPENAI_API_KEY_3`   | No           | —       | Fallback key 3                    |
-| `OPENAI_API_KEY_4`   | No           | —       | Fallback key 4                    |
+| Variable               | Required  | Default | Description                          |
+|------------------------|-----------|---------|--------------------------------------|
+| `DEV_MODE`             | No        | `true`  | Skip API key validation in dev       |
+| `CORS_ORIGIN`          | No        | `*`     | Allowed CORS origin                  |
+| `OPENAI_API_KEY_1`–`4` | Prod only | —       | OpenAI keys (4-key rotation)         |
+| `SUPABASE_URL`         | No        | —       | Supabase project URL                 |
+| `SUPABASE_SERVICE_KEY`  | No        | —       | Supabase service role key            |
+| `R2_ACCOUNT_ID`        | No        | —       | Cloudflare account ID                |
+| `R2_ACCESS_KEY_ID`     | No        | —       | R2 API token access key              |
+| `R2_SECRET_ACCESS_KEY` | No        | —       | R2 API token secret                  |
+| `R2_BUCKET_NAME`       | No        | —       | R2 bucket name                       |
+| `CLERK_SECRET_KEY`     | No        | —       | Clerk backend secret key             |
+
+> All Supabase/R2/Clerk vars are **optional**. Missing → warning log, graceful degradation to in-memory-only mode.
 
 ---
 
 ## 5. Architecture Flow
 
 ```
-Upload → Store DataFrame in memory (keyed by file_id)
+Upload → Store DataFrame in memory → Async: R2 upload + Supabase metadata
                     ↓
-Analyze → Validation Layer → Decision Router → Stat Engine → Store coefficients
-                    ↓                              ↓
-              (Phase 2: LLM Call 1)         (Phase 2: LLM Call 2)
-                    ↓                              ↓
-           Parse intent + features        Generate insight text
+Analyze → Validation → Decision Router → Stat Engine → Store coefficients
+                    ↓                          ↓          ↓
+              (Phase 2: LLM)            Async: Supabase persist
                     ↓
 Simulate → Read cached coefficients → Build graph → DFS propagate → Return impacts
 ```
 
+### Graceful Degradation
+
+| Service  | Missing env vars    | Behaviour                          |
+|----------|---------------------|------------------------------------|
+| Supabase | `SUPABASE_URL`      | Warning log, in-memory only        |
+| R2       | `R2_ACCOUNT_ID`     | Warning log, no file persistence   |
+| Clerk    | `CLERK_SECRET_KEY`  | Anonymous mode, all users = None   |
+
 ### Fallback Chain (4 layers — never crash)
 
-| Layer | Trigger                    | Fallback                                           |
-|-------|----------------------------|-----------------------------------------------------|
-| 1     | LLM Call 1 fails           | Auto-select all numeric columns, infer target        |
-| 2     | PLS engine fails           | Fall back to OLS regression, update trace            |
-| 3     | OLS also fails             | Return `drivers: [], r2: null` with message          |
-| 4     | LLM Call 2 fails           | Template string: `"{driver} shows the strongest..."` |
+| Layer | Trigger              | Fallback                                 |
+|-------|----------------------|------------------------------------------|
+| 1     | LLM Call 1 fails     | Auto-select all numeric columns          |
+| 2     | PLS engine fails     | Fall back to OLS regression              |
+| 3     | OLS also fails       | Return `drivers: [], r2: null`           |
+| 4     | LLM Call 2 fails     | Template string summary                  |
 
 ---
 
 ## 6. Key Design Decisions
 
-| Decision | Choice | Rationale |
+| Decision | Choice | Reference |
 |---|---|---|
-| OLS solver | `np.linalg.lstsq` | Numerically stable for near-singular matrices; never use `np.linalg.inv` |
-| Bootstrap | `seed=42`, `n=200` max | Reproducible results; stays within 2s latency budget |
-| PLS latent vars | `mean(indicators)` | Full NIPALS exceeds build window; mean-LV is defensible for demo |
-| In-memory store | `OrderedDict` + `asyncio.Lock` | No external DB needed; 10-entry LRU cap prevents RAM exhaustion |
-| Cycle detection | `visited: set` in DFS | Prevents infinite recursion on circular coefficient graphs |
-| Column names | Strip whitespace, **don't** lowercase | Preserves original casing for LLM variable matching |
+| Authentication | Clerk — header extraction only, no SDK | [ADR-0001](.docs/more/adrs/0001-clerk-authentication.md) |
+| Metadata DB | Supabase (PostgreSQL) | [ADR-0002](.docs/more/adrs/0002-supabase-metadata.md) |
+| Object storage | Cloudflare R2 (S3-compatible, zero egress) | [ADR-0003](.docs/more/adrs/0003-cloudflare-r2-storage.md) |
+| OLS solver | `np.linalg.lstsq` | Numerically stable; never `np.linalg.inv` |
+| Bootstrap | `seed=42`, max 200 samples | Reproducible, within 2s latency budget |
+| Async persistence | `asyncio.create_task` + `run_in_executor` | Fire-and-forget, never blocks response |
+| Column names | Strip whitespace, **don't** lowercase | Preserves casing for LLM matching |
 
 ---
 
 ## 7. Testing
 
-The test suite at `backend/tests/test_backend.py` covers **118 assertions** across **13 test groups**:
+The test suite at `backend/tests/test_backend.py` covers **143 assertions** across **20 test functions**:
 
 | Group | What it covers |
 |---|---|
@@ -211,19 +255,29 @@ The test suite at `backend/tests/test_backend.py` covers **118 assertions** acro
 | Upload — Happy | `.xlsx`, `.csv`, whitespace stripping, dtype detection |
 | Upload — Errors | 415 (bad type), 413 (too large), 422 (multiple primary) |
 | Upload — Edge | Single-row, NaN, mixed types, 25 columns, 0 rows, Unicode |
-| LRU Eviction | 12 uploads → oldest 2 evicted → newest accessible |
+| LRU Eviction | 12 uploads → oldest 2 evicted |
 | Analyze — Happy | Response shape, driver ordering, R² range, trace fields |
-| Analyze — Errors | 404 (unknown file_id), 422 (missing fields) |
+| Analyze — Errors | 404, 422 |
 | Analyze — Edge | Single-col, all-string, NaN, 2-row, constant, reproducibility, 20-feature |
 | Simulate — Happy | Positive/negative/zero delta, impact structure |
-| Simulate — Errors | 404, 409, 422 (invalid variable), missing fields |
+| Simulate — Errors | 404, 409, 422, missing fields |
 | Simulate — Edge | Large delta, tiny delta, rounding |
 | CORS | OPTIONS preflight |
-| E2E | Full upload → analyze → simulate chain |
+| E2E Flow | upload → analyze → simulate |
+| Auth Context | Header extraction, missing/empty header |
+| R2 Module | Key generation, graceful degradation |
+| Supabase Module | CRUD safe defaults when unavailable |
+| Upload Presign | 401, 503, 422 |
+| Datasets Endpoint | 401, 200, response shape |
+| Upload with Auth | Works with and without auth |
+| Auth E2E | Full authenticated flow with 4 steps |
 
 ```bash
-# Run tests
-PYTHONPATH=. DEV_MODE=true python3 backend/tests/test_backend.py
+# Run via pytest
+python -m pytest backend/tests/ -v
+
+# Run standalone
+python backend/tests/test_backend.py
 ```
 
 ---
@@ -240,10 +294,12 @@ services:
     rootDir: backend
     buildCommand: pip install -e .
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
 ```
 
 **Pre-demo checklist:**
 1. Set `DEV_MODE=false` in Render env vars
 2. Set `CORS_ORIGIN` to exact Vercel URL
 3. Set at least `OPENAI_API_KEY_1`
-4. Hit `GET /health` 5 min before demo to pre-warm
+4. Set Supabase/R2/Clerk env vars for full persistence
+5. Hit `GET /health` 5 min before demo to pre-warm
