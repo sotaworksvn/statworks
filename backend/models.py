@@ -106,6 +106,22 @@ class DatasetListResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# User sync (F-05 — Clerk ↔ Supabase)
+# ---------------------------------------------------------------------------
+
+class SyncUserRequest(BaseModel):
+    clerk_user_id: str
+    email: str | None = None
+    name: str | None = None
+
+
+class SyncUserResponse(BaseModel):
+    id: str | None
+    clerk_user_id: str
+    synced: bool
+
+
+# ---------------------------------------------------------------------------
 # Internal models used across modules
 # ---------------------------------------------------------------------------
 

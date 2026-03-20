@@ -37,6 +37,7 @@ Thumbs.db
 
 # Supabase local
 supabase/.temp/
+backend/supabase/
 
 # AI agent scaffolding (not part of the project source)
 .agent/

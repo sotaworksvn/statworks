@@ -42,7 +42,10 @@ SYSTEM_PROMPT_INSIGHT: str = (
     "bootstrap, latent variable, SEM, beta, R-squared.\n"
     "- Write as if advising a CEO who has never taken a statistics class.\n"
     "- The summary should be 1-2 sentences explaining the key finding.\n"
-    "- The recommendation should be 1-2 sentences of actionable advice.\n\n"
+    "- The recommendation should be 1-2 sentences of actionable advice.\n"
+    "- The drivers are listed in order from STRONGEST to WEAKEST impact. "
+    "Your summary MUST reflect this same ranking order — mention the #1 "
+    "driver first, then secondary drivers.\n\n"
     "Return ONLY valid JSON matching this schema:\n"
     '{"summary": "string", "recommendation": "string"}\n'
     "Do not include markdown, code fences, or explanation."
@@ -66,6 +69,7 @@ async def generate_insight(
     ----------
     drivers : list[dict]
         List of driver dicts with ``name``, ``coef``, ``p_value``, ``significant``.
+        Pre-sorted by absolute impact (strongest first).
     r2 : float | None
         R-squared value from the model.
     target : str
@@ -85,12 +89,12 @@ async def generate_insight(
         return _template_fallback(drivers, target)
 
     driver_lines: list[str] = []
-    for d in drivers[:5]:
+    for rank, d in enumerate(drivers[:5], start=1):
         direction = "positively" if d["coef"] > 0 else "negatively"
         strength = abs(d["coef"])
         sig_label = "strong" if d.get("significant", False) else "weak"
         driver_lines.append(
-            f"- {d['name']} has a {sig_label} {direction} relationship "
+            f"- #{rank} {d['name']} has a {sig_label} {direction} relationship "
             f"with {target} (impact strength: {strength:.2f})"
         )
 
@@ -106,7 +110,7 @@ async def generate_insight(
 
     user_prompt = (
         f"Target outcome: {target}\n"
-        f"Key findings:\n"
+        f"Key findings (ranked by impact, strongest first):\n"
         + "\n".join(driver_lines)
         + ("\n" + fit_desc if fit_desc else "")
         + "\n\nPlease provide a summary and recommendation."

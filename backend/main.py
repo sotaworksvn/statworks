@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.auth.context import get_current_user_id
 from backend.config import CORS_ORIGIN
 from backend.db import supabase as supa
-from backend.models import DatasetItem, DatasetListResponse
+from backend.models import DatasetItem, DatasetListResponse, SyncUserRequest, SyncUserResponse
 from backend.upload import router as upload_router
 from backend.analyze import router as analyze_router
 from backend.simulate import router as simulate_router
@@ -47,6 +47,37 @@ app.add_middleware(
 async def health() -> dict[str, str]:
     """Health check — used to pre-warm Render and for uptime monitors."""
     return {"status": "ok"}
+
+# ---------------------------------------------------------------------------
+# User sync (F-05 — Clerk ↔ Supabase)
+# ---------------------------------------------------------------------------
+
+@app.post("/sync-user", response_model=SyncUserResponse)
+async def sync_user(body: SyncUserRequest) -> SyncUserResponse:
+    """Upsert a Clerk user into Supabase.
+
+    Called by the frontend on every login to ensure the user record
+    exists in the ``users`` table before any uploads or analyses.
+    Idempotent: safe to call repeatedly.
+    """
+    if not supa.is_available():
+        return SyncUserResponse(
+            id=None,
+            clerk_user_id=body.clerk_user_id,
+            synced=False,
+        )
+
+    db_id = supa.upsert_user(
+        clerk_user_id=body.clerk_user_id,
+        email=body.email,
+        name=body.name,
+    )
+
+    return SyncUserResponse(
+        id=db_id,
+        clerk_user_id=body.clerk_user_id,
+        synced=db_id is not None,
+    )
 
 # ---------------------------------------------------------------------------
 # Datasets listing (F-05 — infrastructure)

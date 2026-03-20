@@ -59,6 +59,8 @@ def _detect_indicator_groups(
     placed in their own singleton group.
 
     Returns a dict mapping a group label to its constituent column names.
+    Group labels are human-readable: for multi-indicator groups, names are
+    joined (e.g. "Trust + Freedom") rather than opaque "LV_0".
     """
     numeric_feats = [f for f in features if pd.api.types.is_numeric_dtype(df[f])]
     if len(numeric_feats) < 2:
@@ -68,7 +70,6 @@ def _detect_indicator_groups(
     corr = df[numeric_feats].corr().abs()
     visited: set[str] = set()
     groups: dict[str, list[str]] = {}
-    group_idx = 0
 
     for feat in numeric_feats:
         if feat in visited:
@@ -80,9 +81,18 @@ def _detect_indicator_groups(
         ]
         group = [feat] + related
         visited.update(group)
-        label = f"LV_{group_idx}" if len(group) > 1 else feat
+
+        if len(group) > 1:
+            # Human-readable label: join indicator names with " + "
+            # Show max 2 indicators to keep chart labels compact
+            short_names = [_clean_indicator_name(n) for n in group[:2]]
+            label = " + ".join(short_names)
+            if len(group) > 2:
+                label += f" (+{len(group) - 2} more)"
+        else:
+            label = feat
+
         groups[label] = group
-        group_idx += 1
 
     # Add any non-numeric features as singletons
     for f in features:
@@ -90,6 +100,22 @@ def _detect_indicator_groups(
             groups[f] = [f]
 
     return groups
+
+
+def _clean_indicator_name(name: str) -> str:
+    """Clean up an indicator column name for display.
+
+    Strips trailing year suffixes and common prefixes to make names
+    shorter and more readable.
+    """
+    # Remove common suffixes like "_2019", " 2019"
+    import re
+    cleaned = re.sub(r"[_ ]\d{4}$", "", name)
+    # Replace underscores with spaces and title-case
+    cleaned = cleaned.replace("_", " ").strip()
+    if cleaned:
+        return cleaned.title()
+    return name
 
 
 def compute_pls(
