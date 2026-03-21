@@ -606,6 +606,49 @@ def _dispatch_direct(intent: str, df: "pd.DataFrame", target: str) -> AnalyzeRes
 # ---------------------------------------------------------------------------
 
 
+import re as _re
+
+
+def _detect_date_format(query: str) -> tuple[str, bool] | None:
+    """Detect desired date format from a user query string.
+
+    Returns ``(strftime_format, dayfirst)`` or ``None`` if no format found.
+    Fallback (if ambiguous) → DD/MM/YYYY.
+    """
+    q = query.upper()
+    if "DD/MM/YYYY" in q:
+        return "%d/%m/%Y", True
+    if "DD-MM-YYYY" in q:
+        return "%d-%m-%Y", True
+    if "MM/DD/YYYY" in q:
+        return "%m/%d/%Y", False
+    if "MM-DD-YYYY" in q:
+        return "%m-%d-%Y", False
+    if "YYYY-MM-DD" in q:
+        return "%Y-%m-%d", True
+    if "YYYY/MM/DD" in q:
+        return "%Y/%m/%d", True
+    return None
+
+
+def _detect_row_range(query: str) -> tuple[int, int] | None:
+    """Detect a row range from the query (e.g. 'rows 25-30', 'hàng 25 đến 30').
+
+    Returns ``(start, end)`` as 0-based inclusive indices, or ``None``.
+    """
+    m = _re.search(
+        r'(?:rows?|hàng|dòng)\s*(\d+)\s*[-–tođến]+\s*(\d+)',
+        query, _re.IGNORECASE,
+    )
+    if m:
+        a, b = int(m.group(1)), int(m.group(2))
+        # Convert to 0-based (user likely uses 1-based or 0-based — assume smallest is row 0)
+        start = min(a, b)
+        end = max(a, b)
+        return start, end
+    return None
+
+
 async def _handle_data_edit(
     df: "pd.DataFrame",
     cleaned: "CleanedIntent",
@@ -613,6 +656,7 @@ async def _handle_data_edit(
     body: "AnalyzeRequest",
 ) -> AnalyzeResponse:
     """Handle data_edit intent — modify dataset values via AI."""
+    import pandas as pd
     from backend.store import get_entry, set_entry
 
     _no_trace = DecisionTrace(
@@ -642,8 +686,57 @@ async def _handle_data_edit(
         )
 
     applied = 0
-    edit_details = []
+    edit_details: list[str] = []
 
+    # ── Date format bulk-conversion (deterministic, not LLM) ──────────
+    fmt_result = _detect_date_format(body.query)
+    if fmt_result is not None:
+        strftime_fmt, dayfirst = fmt_result
+        # Identify the target date column from the LLM edits
+        date_cols_from_edits = {e.get("column") for e in edits if e.get("column") in df.columns}
+        row_range = _detect_row_range(body.query)
+
+        for col in date_cols_from_edits:
+            original = df[col].copy()
+            converted = pd.to_datetime(df[col], dayfirst=dayfirst, format="mixed", errors="coerce")
+            formatted = converted.dt.strftime(strftime_fmt)
+
+            if row_range is not None:
+                start, end = row_range
+                end = min(end, len(df) - 1)
+                start = max(start, 0)
+                mask = (df.index >= start) & (df.index <= end)
+                count = int(mask.sum())
+                # Apply only to the specified range, keep original on parse failure
+                df.loc[mask, col] = formatted.where(converted.notna(), original)[mask]
+                applied += count
+                edit_details.append(
+                    f"Formatted '{col}' to {strftime_fmt} for rows {start}–{end} ({count} row(s))"
+                )
+            else:
+                # Apply to ALL rows, keep original on parse failure
+                df[col] = formatted.where(converted.notna(), original)
+                count = int(converted.notna().sum())
+                applied += count
+                edit_details.append(
+                    f"Formatted '{col}' to {strftime_fmt} for all {count} row(s)"
+                )
+
+        # Save and return early — skip per-row LLM edits
+        entry.dataframe = df
+        entry.row_count = len(df)
+        await set_entry(entry)
+
+        summary = f"✅ Successfully formatted {applied} cell(s). " + "; ".join(edit_details)
+        return AnalyzeResponse(
+            summary=summary,
+            drivers=[], r2=None,
+            recommendation="The dataset has been updated. Your next analysis will use the updated data.",
+            model_type=None, decision_trace=_no_trace,
+            result_type="data_edit",
+        )
+
+    # ── Standard per-row edits (non-date) ─────────────────────────────
     for edit in edits:
         col = edit.get("column")
         new_val = edit.get("new_value")
@@ -682,6 +775,7 @@ async def _handle_data_edit(
         model_type=None, decision_trace=_no_trace,
         result_type="data_edit",
     )
+
 
 async def _handle_comparison(
     df: "pd.DataFrame",

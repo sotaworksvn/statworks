@@ -242,6 +242,14 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
     # Strip column name whitespace (but do NOT lowercase)
     df.columns = df.columns.str.strip()
 
+    # 3b. Normalize date column "Ngày" → DD/MM/YYYY
+    if "Ngày" in df.columns:
+        original = df["Ngày"].copy()
+        converted = pd.to_datetime(df["Ngày"], dayfirst=True, format="mixed", errors="coerce")
+        formatted = converted.dt.strftime("%d/%m/%Y")
+        # Keep original value where parsing failed (NaT → strftime gives NaN)
+        df["Ngày"] = formatted.where(converted.notna(), original)
+
     # 4. Parse context files
     context_parts: list[str] = []
     for fn, ext, data in file_data:
