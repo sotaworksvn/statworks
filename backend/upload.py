@@ -26,13 +26,11 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-ALLOWED_PRIMARY = {".xlsx", ".csv"}
+ALLOWED_PRIMARY = {".xlsx", ".xls", ".csv"}
 ALLOWED_CONTEXT = {".docx", ".pptx", ".pdf"}
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
-MAX_FILES_PER_UPLOAD = 15  # EdTech: up to 15 files (transcripts, CV, certs)
+MAX_FILES_PER_UPLOAD = 3  # EdTech: max 3 Excel/CSV files
 ALLOWED_ALL = ALLOWED_PRIMARY | ALLOWED_CONTEXT
-MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
-MAX_FILES_PER_UPLOAD = 5
 
 
 # ---------------------------------------------------------------------------
@@ -44,10 +42,11 @@ def _get_extension(filename: str) -> str:
     return PurePath(filename).suffix.lower()
 
 
-def _parse_excel(content: bytes) -> pd.DataFrame:
-    """Parse an .xlsx file into a DataFrame."""
+def _parse_excel(content: bytes, ext: str = ".xlsx") -> pd.DataFrame:
+    """Parse an .xlsx or .xls file into a DataFrame."""
     import io
-    return pd.read_excel(io.BytesIO(content), engine="openpyxl")
+    engine = "xlrd" if ext == ".xls" else "openpyxl"
+    return pd.read_excel(io.BytesIO(content), engine=engine)
 
 
 def _parse_csv(content: bytes) -> pd.DataFrame:
@@ -198,7 +197,7 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
     if len(files) > MAX_FILES_PER_UPLOAD:
         raise HTTPException(
             status_code=422,
-            detail=f"Maximum {MAX_FILES_PER_UPLOAD} files per upload. Got {len(files)}.",
+            detail=f"Tối đa {MAX_FILES_PER_UPLOAD} file mỗi lần upload. Bạn đã chọn {len(files)} file.",
         )
 
     # 1. Read all files and validate extensions + sizes
@@ -208,11 +207,11 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
         filename = f.filename or "unknown"
         ext = _get_extension(filename)
 
-        # Extension check
+        # Extension check — only .xlsx, .xls, .csv, .docx, .pptx, .pdf
         if ext not in ALLOWED_ALL:
             raise HTTPException(
                 status_code=415,
-                detail=f"Unsupported file type '{ext}'. Allowed: .xlsx, .csv, .docx, .pptx",
+                detail=f"Định dạng '{ext}' không hỗ trợ. Chỉ chấp nhận: .xlsx, .xls, .csv (bảng điểm) · .docx, .pptx, .pdf (CV, chứng chỉ)",
             )
 
         content = await f.read()
@@ -231,13 +230,13 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
     if len(primary_files) == 0:
         raise HTTPException(
             status_code=422,
-            detail="No primary data file (.xlsx or .csv) provided. At least one is required.",
+            detail="Không tìm thấy file dữ liệu (.xlsx, .xls hoặc .csv). Vui lòng upload ít nhất một file bảng điểm.",
         )
 
     # 3. Parse the first primary file as the main dataset
     primary_fn, primary_ext, primary_content = primary_files[0]
-    if primary_ext == ".xlsx":
-        df = _parse_excel(primary_content)
+    if primary_ext in (".xlsx", ".xls"):
+        df = _parse_excel(primary_content, primary_ext)
     else:
         df = _parse_csv(primary_content)
 

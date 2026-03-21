@@ -78,10 +78,12 @@
   "app": {
     "upload": {
       "title": "Upload Hồ Sơ",
-      "dropzone": "Kéo thả file vào đây hoặc click để chọn",
-      "maxFiles": "Tối đa 15 file",
-      "formats": "Hỗ trợ: Excel, CSV, Word, PDF, PowerPoint",
-      "processing": "Đang xử lý..."
+      "dropzone": "Kéo thả file bảng điểm vào đây hoặc click để chọn",
+      "maxFiles": "Tối đa 3 file",
+      "formats": "Chỉ chấp nhận: .xlsx, .xls, .csv",
+      "processing": "Đang xử lý...",
+      "errorTooMany": "Tối đa 3 file. Vui lòng chọn ít file hơn.",
+      "errorFormat": "Định dạng không hỗ trợ. Chỉ chấp nhận file Excel (.xlsx, .xls, .csv)"
     },
     "chat": {
       "title": "Phân Tích Hồ Sơ",
@@ -94,9 +96,10 @@
     },
     "history": {
       "title": "Lịch Sử",
+      "uploads": "File đã upload",
       "chat": "Phân tích",
-      "viewer": "Xem dữ liệu",
-      "noHistory": "Chưa có lịch sử."
+      "noUploads": "Chưa có file nào được upload",
+      "noHistory": "Chưa có lịch sử phân tích"
     }
   },
   "scholarship": {

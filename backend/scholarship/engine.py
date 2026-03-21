@@ -227,3 +227,116 @@ def _balanced_selection(
     # Sort by score descending for display
     selected.sort(key=lambda x: x["match_score"], reverse=True)
     return selected[:max_total]
+
+
+# ---------------------------------------------------------------------------
+# Live-data enhanced prediction (uses researcher.py with LLM-recalled data)
+# ---------------------------------------------------------------------------
+
+def _merge_live_into_db(live_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge live requirement data with the embedded DB.
+
+    Live data takes priority for numeric requirements.
+    Embedded DB entries not in live_data are kept as-is.
+    """
+    live_map: dict[str, dict] = {}
+    for item in live_data:
+        name = item.get("school_name") or item.get("name")
+        if name:
+            live_map[name] = item
+
+    merged: dict[str, dict] = {s["name"]: dict(s) for s in _SCHOOL_DB}
+
+    for name, live in live_map.items():
+        if name in merged:
+            entry = merged[name]
+            # Update numeric fields if live data has them
+            if live.get("min_gpa") is not None:
+                entry["min_gpa"] = live["min_gpa"]
+            if live.get("avg_gpa") is not None:
+                entry["min_gpa"] = max(entry["min_gpa"], live["avg_gpa"] - 0.15)
+            if live.get("sat_range") and len(live["sat_range"]) == 2:
+                entry["avg_sat"] = int(sum(live["sat_range"]) / 2)
+            if live.get("ielts_min") is not None:
+                entry["avg_ielts"] = live["ielts_min"]
+            if live.get("scholarship_rate") is not None:
+                entry["scholarship_rate"] = live["scholarship_rate"]
+        else:
+            # New school not in embedded DB — add it
+            merged[name] = {
+                "name": name,
+                "country": live.get("country", "Unknown"),
+                "min_gpa": live.get("min_gpa") or live.get("avg_gpa") or 3.5,
+                "avg_sat": (
+                    int(sum(live["sat_range"]) / 2)
+                    if live.get("sat_range") and len(live["sat_range"]) == 2
+                    else None
+                ),
+                "avg_ielts": live.get("ielts_min") or 6.5,
+                "scholarship_rate": live.get("scholarship_rate") or 0.5,
+            }
+
+    return list(merged.values())
+
+
+async def predict_scholarship_with_live_data(
+    profile: dict[str, Any],
+    use_live: bool = True,
+) -> list[dict[str, Any]]:
+    """Enhanced prediction using LLM-recalled live school requirements.
+
+    Args:
+        profile: Extracted student profile dict.
+        use_live: If True, attempts to pull live data via researcher.
+
+    Returns:
+        List of school match dicts sorted by match_score.
+    """
+    school_db = list(_SCHOOL_DB)  # default
+
+    if use_live:
+        try:
+            from backend.scholarship.researcher import enrich_with_live_data, get_cached_schools
+
+            # Use cached data if fresh, else enrich (async, non-blocking on failure)
+            cached = get_cached_schools()
+            if cached:
+                school_db = _merge_live_into_db(cached)
+                logger.debug("Using cached live school data (%d schools)", len(school_db))
+            else:
+                # Try to fetch in background; fall back to embedded immediately
+                try:
+                    live_data = await enrich_with_live_data()
+                    if live_data:
+                        school_db = _merge_live_into_db(live_data)
+                        logger.info("Enriched school DB with live data (%d schools)", len(school_db))
+                except Exception as fetch_exc:
+                    logger.warning("Live enrichment failed, using embedded: %s", fetch_exc)
+        except ImportError:
+            pass  # researcher module not available
+
+    # Run prediction against selected school_db
+    gpa = profile.get("gpa")
+    sat = profile.get("sat_score")
+    ielts = profile.get("ielts_score")
+    toefl = profile.get("toefl_score")
+
+    if ielts is None and toefl is not None:
+        ielts = _toefl_to_ielts(toefl)
+
+    results = []
+    for school in school_db:
+        score, strengths, weaknesses = _compute_match(profile, school, gpa, sat, ielts)
+        if score < 5:
+            continue
+        results.append({
+            "school_name": school.get("name") or school.get("school_name", "Unknown"),
+            "country": school.get("country", "Unknown"),
+            "match_score": score,
+            "match_level": _classify_match(score),
+            "strengths": strengths,
+            "weaknesses": weaknesses,
+        })
+
+    results.sort(key=lambda x: x["match_score"], reverse=True)
+    return _balanced_selection(results, max_total=30)

@@ -78,10 +78,12 @@
   "app": {
     "upload": {
       "title": "Upload Profile",
-      "dropzone": "Drag and drop files here or click to select",
-      "maxFiles": "Maximum 15 files",
-      "formats": "Supported: Excel, CSV, Word, PDF, PowerPoint",
-      "processing": "Processing..."
+      "dropzone": "Drag and drop Excel files here or click to select",
+      "maxFiles": "Maximum 3 files",
+      "formats": "Only accepted: .xlsx, .xls, .csv",
+      "processing": "Processing...",
+      "errorTooMany": "Maximum 3 files. Please select fewer files.",
+      "errorFormat": "Unsupported format. Only Excel files accepted (.xlsx, .xls, .csv)"
     },
     "chat": {
       "title": "Profile Analysis",
@@ -94,9 +96,10 @@
     },
     "history": {
       "title": "History",
+      "uploads": "Uploaded files",
       "chat": "Analysis",
-      "viewer": "Data View",
-      "noHistory": "No history yet."
+      "noUploads": "No files uploaded yet",
+      "noHistory": "No analysis history yet"
     }
   },
   "scholarship": {

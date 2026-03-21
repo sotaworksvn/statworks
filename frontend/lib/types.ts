@@ -36,6 +36,8 @@ export interface UploadedFile {
   readonly uploaded_at: string;
   readonly columns: readonly Column[];
   readonly row_count: number;
+  /** File size in bytes — used for history display */
+  readonly file_size?: number;
 }
 
 // ─── Analysis ─────────────────────────────────────────────────────────────────

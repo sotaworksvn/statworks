@@ -1,6 +1,7 @@
 """In-memory history store with JSON file persistence.
 
-Two categories: chat, data.
+One category: chat.
+Upload history is managed purely on the frontend (Zustand store).
 Entries are keyed by (user_id, category) and sorted newest-first.
 Persists to a JSON file so history survives server restarts.
 """
@@ -120,7 +121,7 @@ def list_entries(
     """List history entries, optionally filtered by category and date range."""
     results: list[HistoryEntry] = []
 
-    categories = [category] if category else ["chat", "data"]
+    categories = [category] if category else ["chat"]
     for cat in categories:
         results.extend(_store[user_id].get(cat, []))
 

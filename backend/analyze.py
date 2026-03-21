@@ -1073,15 +1073,15 @@ async def _handle_scholarship_prediction(entry: object, df, column_names: list) 
     3. Return ranked matches with dream/target/safety classification
     """
     from backend.context.extractor import extract_student_profile
-    from backend.scholarship.engine import predict_scholarship
+    from backend.scholarship.engine import predict_scholarship_with_live_data
 
     try:
         # Extract profile
         context_text = getattr(entry, "context_text", None)
         profile = extract_student_profile(df, context_text, column_names)
 
-        # Predict matches
-        matches = predict_scholarship(profile)
+        # Predict matches — uses live LLM-recalled data when available
+        matches = await predict_scholarship_with_live_data(profile, use_live=True)
 
         # Count by level
         n_dream = sum(1 for m in matches if m["match_level"] == "dream")
