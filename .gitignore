@@ -43,3 +43,7 @@ backend/supabase/
 .agent/
 .agents/
 skills-lock.json
+
+# Data files and generated reports (not part of source)
+data-2019.csv
+*.pdf

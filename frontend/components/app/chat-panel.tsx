@@ -27,10 +27,12 @@ export function ChatPanel() {
     setAnalyzeError,
     isAnalyzing,
     analyzeError,
+    invalidateLocalData,
+    chatMessages: messages,
+    addChatMessage,
   } = useAppStore();
 
   const [query, setQuery] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [promptsHidden, setPromptsHidden] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -52,20 +54,36 @@ export function ChatPanel() {
       setInsight(data);
       setIsAnalyzing(false);
 
-      // Add AI response to chat
+      // If AI edited data, invalidate local cache so Data View re-fetches from backend
+      if (data.result_type === "data_edit" && fileId) {
+        invalidateLocalData(fileId);
+      }
+
       const aiMsg = data.not_supported
         ? data.suggestion ?? "This type of question is not supported yet."
         : data.summary;
-      setMessages((prev) => [...prev, { role: "assistant", content: aiMsg }]);
+      addChatMessage({ role: "assistant", content: aiMsg });
+
+      // Autosave to history (fire-and-forget, OUTSIDE state updater)
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+      fetch(`${backendUrl}/api/history`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(user?.id ? { "x-clerk-user-id": user.id } : {}),
+        },
+        body: JSON.stringify({
+          category: "chat",
+          title: aiMsg.slice(0, 60) + (aiMsg.length > 60 ? "…" : ""),
+          snapshot: { messages: [{ role: "assistant", content: aiMsg }] },
+        }),
+      }).catch((err) => console.warn("[history autosave] chat:", err));
     },
     onError: (err) => {
       const message = err instanceof Error ? err.message : "Analysis failed";
       setAnalyzeError(message);
       setIsAnalyzing(false);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `Error: ${message}` },
-      ]);
+      addChatMessage({ role: "assistant", content: `Error: ${message}` });
       toast.error(message);
     },
   });
@@ -81,7 +99,7 @@ export function ChatPanel() {
       }
 
       // Add user message
-      setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
+      addChatMessage({ role: "user", content: trimmed });
       setPromptsHidden(true);
       setQuery("");
 

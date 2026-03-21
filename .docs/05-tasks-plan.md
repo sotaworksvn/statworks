@@ -5,8 +5,8 @@
 | **Project**      | SOTA StatWorks                                      |
 | **Team**         | Phú Nhuận Builder x SOTA Works                      |
 | **Created**      | 2026-03-20                                          |
-| **Last updated** | 2026-03-20                                          |
-| **Build order**  | Phase 1: Backend → Phase 1.5: Infra Services → Phase 2: AI/LLM → Phase 3: Frontend |
+| **Last updated** | 2026-03-21                                          |
+| **Build order**  | Phase 1: Backend → Phase 1.5: Infra Services → Phase 2: AI/LLM → Phase 3: Frontend → Phase 5: UI/UX Overhaul |
 | **Source docs**  | `01-prd.md` · `02-system-design.md` · `03-features-spec.md` · `04-rule.md` |
 
 ---
@@ -447,4 +447,103 @@ The backend is built first so that the statistical core can be tested and valida
 | Phase 2 — AI / LLM Integration | 4–5h | Prompt token budget; LLM latency on free tier |
 | Phase 3 — Frontend | 8–10h | Animation timing; CORS lockdown; Vercel env var setup; Clerk UI integration |
 | Phase 4 — Pre-Demo | 1–2h | Render cold-start; API key rotation |
-| **Total** | **24–31h** | Within 20–30h PRD constraint (slight stretch) |
+| Phase 5 — UI/UX Overhaul | 6–8h | Sidebar layout; data viewer performance; dashboard ribbon complexity |
+| **Total** | **30–39h** | Extended beyond original PRD constraint due to new requirements |
+
+---
+
+---
+
+# Phase 5 — UI/UX Overhaul (Canva-Inspired)
+
+> **Goal:** Replace the single-screen app layout with a Canva-inspired sidebar navigation. Add Data Viewer (browser tabs), SPSS/SmartPLS Dashboard (ribbon menus), and Upload History (deduplication). Update backend upload limits.
+>
+> **Rule references:** `04-rule.md` §React/Next.js–Component Design (ADR-0004), `03-features-spec.md` F-06/F-07/F-08
+>
+> **ADR:** `.docs/more/adrs/0004-canva-sidebar-navigation.md`
+
+## 5.1 Documentation Updates
+
+| Status | Task | Acceptance |
+|---|---|---|
+| `[x]` | **5.1.1** Create ADR-0004 for Canva sidebar navigation decision. | ADR file exists in `.docs/more/adrs/` |
+| `[x]` | **5.1.2** Update PRD to v0.3 with new scope, Need 6, ADR-0004 reference. | PRD reflects multi-file upload, sidebar, data viewer, dashboard |
+| `[x]` | **5.1.3** Update System Design with sidebar component tree, 20MB/5 files limits. | SD §4.5 reflects new layout |
+| `[x]` | **5.1.4** Update Features Spec: F-01 multi-file, F-04 sidebar, add F-06/F-07/F-08. | Spec contains all 8 features |
+| `[x]` | **5.1.5** Update Rules: sidebar navigation rule, API endpoints. | Rules reflect new architecture |
+| `[x]` | **5.1.6** Update Tasks Plan with Phase 5. | This section |
+
+## 5.2 Backend Changes
+
+| Status | Task | Acceptance |
+|---|---|---|
+| `[ ]` | **5.2.1** Update `upload.py`: MAX_FILE_SIZE=20MB, allow ≤5 files, allow multiple Excel files. | Upload works with 5 files, 20MB each |
+| `[ ]` | **5.2.2** Add SHA-256 content hash to `FileEntry` in `store.py`. | Hash computed on upload |
+| `[ ]` | **5.2.3** Add `GET /datasets/{id}/content` endpoint for Data Viewer. | Endpoint returns parsed file content |
+| `[ ]` | **5.2.4** Add `PUT /datasets/{id}/content` endpoint for inline editing. | Endpoint updates in-memory data |
+| `[ ]` | **5.2.5** Enhance `GET /datasets` response with `content_hash`, `file_type`. | Datasets listing includes new fields |
+
+## 5.3 Frontend — Sidebar Navigation
+
+| Status | Task | Acceptance |
+|---|---|---|
+| `[ ]` | **5.3.1** Create `<Sidebar>` component with 4 nav items + user account. | Sidebar renders with icons/labels |
+| `[ ]` | **5.3.2** Add `activeView` and `hasUploadedData` to Zustand store. | View switching works |
+| `[ ]` | **5.3.3** Replace `<AppHeader>` layout with sidebar + content area. | New layout renders correctly |
+| `[ ]` | **5.3.4** Implement feature gating (disabled items until first upload). | Items disabled before upload |
+
+## 5.4 Frontend — Upload View
+
+| Status | Task | Acceptance |
+|---|---|---|
+| `[ ]` | **5.4.1** Redesign upload zone for multi-file (up to 5, max 20MB). | Upload accepts 5 files |
+| `[ ]` | **5.4.2** Add upload history component with deduplication display. | History shows, dedup works |
+
+## 5.5 Frontend — Data Viewer
+
+| Status | Task | Acceptance |
+|---|---|---|
+| `[ ]` | **5.5.1** Create horizontal browser-tab component. | Tabs render per file |
+| `[ ]` | **5.5.2** Implement Excel data table with editable cells. | Cells editable, data updates |
+| `[ ]` | **5.5.3** Implement Word/PowerPoint content viewer. | Text content displays correctly |
+
+## 5.6 Frontend — Dashboard
+
+| Status | Task | Acceptance |
+|---|---|---|
+| `[ ]` | **5.6.1** Create SPSS/SmartPLS tab switcher. | Two tabs switch correctly |
+| `[ ]` | **5.6.2** Build SPSS ribbon menu with backend-driven actions. | Ribbon renders, actions fire |
+| `[ ]` | **5.6.3** Build SmartPLS ribbon menu with backend-driven actions. | Ribbon renders, actions fire |
+| `[ ]` | **5.6.4** Create results display area. | Results from ribbon actions display |
+
+## 5.7 Verification
+
+| Status | Task | Acceptance |
+|---|---|---|
+| `[ ]` | **5.7.1** Run existing backend tests to confirm no regressions. | All existing tests pass |
+| `[ ]` | **5.7.2** Browser-test full navigation flow: upload → chat → data viewer → dashboard → history. | Flow works end-to-end |
+| `[ ]` | **5.7.3** Verify upload gating and feature unlock behavior. | Gating works as specified |
+
+## 5.8 Chat History (F-09)
+
+> **Goal:** ChatGPT-style persistent conversation management. Each conversation links to uploaded datasets and stores full message history (user queries + AI responses).
+>
+> **Feature spec:** `03-features-spec.md` F-09
+>
+> **ADR:** `.docs/more/adrs/0005-chat-history-persistence.md`
+
+| Status | Task | Acceptance |
+|---|---|---|
+| `[ ]` | **5.8.1** Create Supabase tables: `conversations`, `messages`, `conversation_files`. | Tables exist in Supabase |
+| `[ ]` | **5.8.2** Add Supabase client methods for conversation CRUD. | `create_conversation`, `get_conversations`, `create_message`, `get_messages` |
+| `[ ]` | **5.8.3** Add `GET /conversations` endpoint. | Returns user's conversation list (newest first) |
+| `[ ]` | **5.8.4** Add `POST /conversations` endpoint. | Creates conversation with title and linked dataset |
+| `[ ]` | **5.8.5** Add `GET /conversations/{id}/messages` endpoint. | Returns message thread for a conversation |
+| `[ ]` | **5.8.6** Add `POST /conversations/{id}/messages` endpoint. | Saves a message (user or assistant) |
+| `[ ]` | **5.8.7** Add "History" sidebar item (clock icon, always active). | Item visible, click → history view |
+| `[ ]` | **5.8.8** Create `<HistoryView>` with `<ConversationList>` component. | List renders conversations |
+| `[ ]` | **5.8.9** Wire conversation click → load messages → switch to Chat view. | Full thread loads on click |
+| `[ ]` | **5.8.10** Auto-create conversation on file upload. | Upload → new conversation created |
+| `[ ]` | **5.8.11** Auto-save messages on `/analyze` call (user query + AI response). | Both messages saved |
+| `[ ]` | **5.8.12** Verify chat history persistence and conversation resume. | Re-login shows all history |
+

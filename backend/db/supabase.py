@@ -154,6 +154,29 @@ def get_user_datasets(clerk_user_id: str) -> list[dict[str, Any]]:
         return []
 
 
+def get_dataset_by_file_id(file_id: str) -> dict[str, Any] | None:
+    """Lookup dataset metadata by file_id (the UUID used in the upload).
+
+    Returns a dict with ``r2_key``, ``file_name``, etc. or None.
+    Used by the R2 restore flow when the in-memory store misses.
+    """
+    if _client is None:
+        return None
+
+    try:
+        result = (
+            _client.table("datasets")
+            .select("id, file_name, r2_key, created_at")
+            .eq("id", file_id)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else None
+    except Exception as exc:
+        logger.error("Supabase get_dataset_by_file_id failed: %s", exc)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Analysis operations
 # ---------------------------------------------------------------------------
@@ -175,3 +198,182 @@ def create_analysis(dataset_id: str, result: dict[str, Any]) -> str | None:
     except Exception as exc:
         logger.error("Supabase create_analysis failed: %s", exc)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Conversation operations (F-09 — Chat History)
+# ---------------------------------------------------------------------------
+
+def create_conversation(
+    clerk_user_id: str,
+    title: str,
+    dataset_ids: list[str] | None = None,
+) -> dict[str, Any] | None:
+    """Create a new conversation and optionally link datasets.
+
+    Returns the full conversation row dict or None on failure.
+    """
+    if _client is None:
+        return None
+
+    try:
+        conv_data: dict[str, Any] = {
+            "user_id": clerk_user_id,
+            "title": title[:80],  # Truncate to 80 chars
+        }
+        result = _client.table("conversations").insert(conv_data).execute()
+        if not result.data:
+            return None
+
+        conv = result.data[0]
+        conv_id = conv["id"]
+
+        # Link datasets if provided
+        if dataset_ids:
+            links = [
+                {"conversation_id": conv_id, "dataset_id": did}
+                for did in dataset_ids
+            ]
+            _client.table("conversation_files").insert(links).execute()
+
+        return conv
+    except Exception as exc:
+        logger.error("Supabase create_conversation failed: %s", exc)
+        return None
+
+
+def get_user_conversations(clerk_user_id: str) -> list[dict[str, Any]]:
+    """Fetch all conversations for a user, newest first.
+
+    Each row includes: id, title, created_at, updated_at, plus
+    linked file names and message count (computed via separate queries
+    to keep the main query fast).
+    """
+    if _client is None:
+        return []
+
+    try:
+        result = (
+            _client.table("conversations")
+            .select("id, title, user_id, created_at, updated_at")
+            .eq("user_id", clerk_user_id)
+            .order("updated_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+        conversations = result.data or []
+
+        # Enrich with file names and message count
+        for conv in conversations:
+            cid = conv["id"]
+
+            # Linked file names
+            try:
+                files_result = (
+                    _client.table("conversation_files")
+                    .select("dataset_id")
+                    .eq("conversation_id", cid)
+                    .execute()
+                )
+                dataset_ids = [f["dataset_id"] for f in (files_result.data or [])]
+                # Fetch file names from datasets table
+                file_names: list[str] = []
+                for did in dataset_ids:
+                    ds_result = (
+                        _client.table("datasets")
+                        .select("file_name")
+                        .eq("id", did)
+                        .limit(1)
+                        .execute()
+                    )
+                    if ds_result.data:
+                        file_names.append(ds_result.data[0]["file_name"])
+                conv["file_names"] = file_names
+            except Exception:
+                conv["file_names"] = []
+
+            # Message count
+            try:
+                msg_result = (
+                    _client.table("messages")
+                    .select("id", count="exact")
+                    .eq("conversation_id", cid)
+                    .execute()
+                )
+                conv["message_count"] = msg_result.count or 0
+            except Exception:
+                conv["message_count"] = 0
+
+        return conversations
+    except Exception as exc:
+        logger.error("Supabase get_user_conversations failed: %s", exc)
+        return []
+
+
+def create_message(
+    conversation_id: str,
+    role: str,
+    content: dict[str, Any],
+) -> str | None:
+    """Insert a message into a conversation.  Returns the message ``id``."""
+    if _client is None:
+        return None
+
+    try:
+        data: dict[str, Any] = {
+            "conversation_id": conversation_id,
+            "role": role,
+            "content": content,
+        }
+        result = _client.table("messages").insert(data).execute()
+
+        # Also update conversation.updated_at
+        try:
+            _client.table("conversations").update(
+                {"updated_at": "now()"}
+            ).eq("id", conversation_id).execute()
+        except Exception:
+            pass  # Non-critical
+
+        if result.data:
+            return result.data[0].get("id")
+        return None
+    except Exception as exc:
+        logger.error("Supabase create_message failed: %s", exc)
+        return None
+
+
+def get_conversation_messages(conversation_id: str) -> list[dict[str, Any]]:
+    """Fetch all messages for a conversation, oldest first."""
+    if _client is None:
+        return []
+
+    try:
+        result = (
+            _client.table("messages")
+            .select("id, role, content, created_at")
+            .eq("conversation_id", conversation_id)
+            .order("created_at", desc=False)
+            .limit(200)
+            .execute()
+        )
+        return result.data or []
+    except Exception as exc:
+        logger.error("Supabase get_conversation_messages failed: %s", exc)
+        return []
+
+
+def link_conversation_file(conversation_id: str, dataset_id: str) -> bool:
+    """Link a dataset to an existing conversation.  Returns True on success."""
+    if _client is None:
+        return False
+
+    try:
+        _client.table("conversation_files").upsert(
+            {"conversation_id": conversation_id, "dataset_id": dataset_id},
+            on_conflict="conversation_id,dataset_id",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.error("Supabase link_conversation_file failed: %s", exc)
+        return False

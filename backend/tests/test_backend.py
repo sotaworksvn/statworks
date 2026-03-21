@@ -119,15 +119,16 @@ def test_upload_errors():
     report("415 has detail message", "detail" in r.json())
 
     # 3b. Oversized file (413)
-    huge = io.BytesIO(b"x" * (11 * 1024 * 1024))  # 11 MB
+    huge = io.BytesIO(b"x" * (21 * 1024 * 1024))  # 21 MB (exceeds 20 MB limit)
     r = client.post("/upload", files=[("files", ("big.xlsx", huge, "application/octet-stream"))])
     report("Oversized file → 413", r.status_code == 413)
 
-    # 3c. Two primary files (422)
-    f1 = _make_xlsx({"A": [1]}, "data1.xlsx")
-    f2 = _make_csv({"B": [2]}, "data2.csv")
-    r = client.post("/upload", files=[("files", f1), ("files", f2)])
-    report("Two primary files → 422", r.status_code == 422)
+    # 3c. Too many files (422 — more than 5)
+    over_files = []
+    for i in range(6):
+        over_files.append(("files", _make_xlsx({"A": [i]}, f"data{i}.xlsx")))
+    r = client.post("/upload", files=over_files)
+    report("Too many files → 422", r.status_code == 422)
 
     # 3d. No primary file (422 — only context file)
     docx_buf = io.BytesIO(b"fake docx")

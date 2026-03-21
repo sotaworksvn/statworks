@@ -62,6 +62,7 @@ async def generate_insight(
     r2: float | None,
     target: str,
     model_type: str,
+    user_query: str = "",
 ) -> InsightText:
     """Generate business-language insight using gpt-5.4.
 
@@ -109,11 +110,13 @@ async def generate_insight(
             fit_desc = f"The model explains {pct:.0f}% of the variation, suggesting other factors are also at play."
 
     user_prompt = (
+        f"User's original question: {user_query}\n\n" if user_query else ""
+    ) + (
         f"Target outcome: {target}\n"
         f"Key findings (ranked by impact, strongest first):\n"
         + "\n".join(driver_lines)
         + ("\n" + fit_desc if fit_desc else "")
-        + "\n\nPlease provide a summary and recommendation."
+        + "\n\nPlease provide a summary and recommendation that directly answer the user's question."
     )
 
     try:

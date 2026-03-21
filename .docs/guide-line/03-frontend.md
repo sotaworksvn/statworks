@@ -39,7 +39,9 @@ frontend/
 │   ├── globals.css             # Tailwind CSS v4 + custom design tokens
 │   └── app/
 │       ├── layout.tsx          # App layout (full-height flex)
-│       └── page.tsx            # Main application (/app) — auth gate + workspace
+│       ├── page.tsx            # Redirect to [[...slug]]
+│       └── [[...slug]]/
+│           └── page.tsx        # Catch-all route — URL↔Zustand sync
 ├── components/
 │   ├── providers.tsx           # ClerkProvider, QueryClientProvider, AuthSync
 │   ├── app/
@@ -48,7 +50,10 @@ frontend/
 │   │   ├── chat-panel.tsx      # Chat panel — user questions + AI responses
 │   │   ├── insight-panel.tsx   # Insight panel — summary, driver ranking chart, recommendation
 │   │   ├── simulation-bar.tsx  # Simulation controls — variable select, delta slider, results
-│   │   └── result-badge.tsx    # Animated impact badge with count-up effect
+│   │   ├── sidebar.tsx         # Canva-style sidebar — light gradient, logo toggle, router.push nav
+│   │   ├── dashboard.tsx       # Monitor page — Data Analysis + Impact Analysis tabs with ribbons
+│   │   ├── data-viewer.tsx     # Data Viewer — browser-tab file viewer with inline editing
+│   │   ├── history-view.tsx    # History — 3-tab ribbon (Chat, Data Edits, Monitor) with date filters
 │   └── ui/                    # shadcn/ui primitives (button, skeleton, select, etc.)
 ├── hooks/
 │   └── use-auth-sync.ts       # Auto-sync Clerk user → backend /sync-user
@@ -88,7 +93,16 @@ frontend/
 | Route  | Component               | Description                                    |
 |--------|-------------------------|------------------------------------------------|
 | `/`    | `app/page.tsx`          | Landing page with hero, features, team section |
-| `/app` | `app/app/page.tsx`      | Main workspace — auth-gated                    |
+| `/app` | `app/app/[[...slug]]/page.tsx` | Main workspace — auth-gated, catch-all route |
+| `/app/chat` | ^                  | AI Chat view                                   |
+| `/app/viewer` | ^              | Data Viewer                                    |
+| `/app/monitor` | ^             | Monitor (default: Data Analysis tab)           |
+| `/app/monitor/data-analysis` | ^ | Monitor → Data Analysis tab               |
+| `/app/monitor/impact-analysis` | ^ | Monitor → Impact Analysis tab           |
+| `/app/history` | ^             | History (default: AI Chat tab)                 |
+| `/app/history/chat` | ^        | History → AI Chat tab                          |
+| `/app/history/viewer` | ^      | History → Data Edits tab                       |
+| `/app/history/monitor` | ^     | History → Monitor tab                          |
 
 ### `/app` Auth Flow
 
@@ -148,12 +162,12 @@ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
 
 All backend calls go through typed helper functions:
 
-| Function               | Endpoint          | Auth header          |
-|------------------------|--------------------|----------------------|
-| `uploadFile(files)`    | `POST /upload`     | `x-clerk-user-id`   |
-| `analyzeDataset(fileId, query)` | `POST /analyze` | `x-clerk-user-id` |
-| `simulateScenario(fileId, var, delta)` | `POST /simulate` | `x-clerk-user-id` |
-| `syncUser(clerkId, email, name)` | `POST /sync-user` | —          |
+| Function               | Endpoint               | Auth header          |
+|------------------------|-----------------------|----------------------|
+| `uploadFile(files)`    | `POST /api/upload`    | `x-clerk-user-id`   |
+| `analyzeDataset(fileId, query)` | `POST /api/chat/analyze` | `x-clerk-user-id` |
+| `simulateScenario(fileId, var, delta)` | `POST /api/monitor/simulate` | `x-clerk-user-id` |
+| `syncUser(clerkId, email, name)` | `POST /api/auth/sync-user` | —          |
 
 All functions throw on non-2xx responses with the parsed error `detail` message.
 

@@ -69,7 +69,9 @@ backend/
 
 ## 3. API Reference
 
-### `GET /health`
+> **Convention:** All endpoints use the `/api/*` prefix, grouped by feature: `/api/upload`, `/api/chat/*`, `/api/data/*`, `/api/monitor/*`, `/api/history/*`, `/api/auth/*`, `/api/health`.
+
+### `GET /api/health`
 Health check for uptime monitors and Render pre-warming.
 
 | Field    | Value            |
@@ -79,7 +81,7 @@ Health check for uptime monitors and Render pre-warming.
 
 ---
 
-### `POST /upload`
+### `POST /api/upload`
 Accepts multipart form-data with one or more files. Persists to R2 + Supabase async if user is authenticated.
 
 **Rules:**
@@ -106,7 +108,7 @@ Accepts multipart form-data with one or more files. Persists to R2 + Supabase as
 
 ---
 
-### `POST /upload/presign`
+### `POST /api/upload/presign`
 Generate a presigned R2 upload URL for direct frontend upload. **Requires `x-clerk-user-id` header.**
 
 **Request:** `{"file_name": "data.csv"}`
@@ -127,7 +129,7 @@ Generate a presigned R2 upload URL for direct frontend upload. **Requires `x-cle
 
 ---
 
-### `POST /analyze`
+### `POST /api/chat/analyze`
 Runs statistical analysis on an uploaded dataset. Persists results to Supabase async.
 
 **Request:** `{"file_id": "...", "query": "What affects retention?"}`
@@ -157,7 +159,7 @@ Runs statistical analysis on an uploaded dataset. Persists results to Supabase a
 
 ---
 
-### `POST /simulate`
+### `POST /api/monitor/simulate`
 Propagates a variable change through the coefficient graph.
 
 **Request:** `{"file_id": "...", "variable": "Trust", "delta": 0.20}`
@@ -171,8 +173,23 @@ Propagates a variable change through the coefficient graph.
 
 ---
 
-### `GET /datasets`
-Lists all datasets for the authenticated user. **Requires `x-clerk-user-id` header.**
+### `GET /api/data/{id}/content`
+Returns parsed file content. **Requires `x-clerk-user-id` header.**
+
+---
+
+### `PATCH /api/data/{id}/cells`
+Inline editing — update specific cells in a dataset.
+
+---
+
+### `GET /api/history`
+Lists all history entries for the authenticated user.
+
+---
+
+### `GET /api/history/export-pdf`
+Exports session history as a rich-text PDF report (Markdown → ReportLab).
 
 | Status | Condition           |
 |--------|---------------------|
@@ -293,7 +310,7 @@ services:
     runtime: python
     buildCommand: pip install -r backend/requirements.txt
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /health
+    healthCheckPath: /api/health
 ```
 
 > **Important:** Root Directory must be **empty** (deploy from project root) because all Python imports use `from backend.xxx`.

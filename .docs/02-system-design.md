@@ -6,7 +6,7 @@
 | **Team**        | Phú Nhuận Builder x SOTA Works      |
 | **Project**     | SOTA StatWorks                      |
 | **Created**     | 2026-03-20                          |
-| **Last updated**| 2026-03-20                          |
+| **Last updated**| 2026-03-21                          |
 | **PRD**         | `.docs/01-prd.md`                   |
 
 ---
@@ -89,7 +89,7 @@ graph TD
 
     Browser -->|"Login"| Clerk
     Clerk -->|"user_id"| Browser
-    Browser -->|"POST /upload\nPOST /analyze\nPOST /simulate\nx-clerk-user-id header"| API
+    Browser -->|"POST /api/upload\nPOST /api/chat/analyze\nPOST /api/monitor/simulate\nx-clerk-user-id header"| API
     API --> AuthCtx
     AuthCtx --> Ingest
     Ingest --> AILayer
@@ -162,7 +162,7 @@ POST /simulate  { variable: string, delta: float, file_id: string }
 
 | Component | Owns | Exposes | Depends on |
 |---|---|---|---|
-| **API Gateway** | Routing, request validation (Pydantic), CORS | HTTP endpoints: `/upload`, `/analyze`, `/simulate` | All internal components |
+| **API Gateway** | Routing, request validation (Pydantic), CORS | HTTP endpoints under `/api/*`: `/api/upload`, `/api/chat/analyze`, `/api/monitor/simulate`, `/api/data/*`, `/api/history/*`, `/api/auth/*`, `/api/health` | All internal components |
 | **Data Ingestion Layer** | File parsing, column type detection, in-memory DataFrame store | `DataFrame`, `file_id`, column metadata | `pandas`, `openpyxl`, `python-docx`, `python-pptx` |
 | **AI Layer** | Prompt construction, LLM call management, retry logic, insight template | `ParsedIntent`, `InsightText` | OpenRouter API |
 | **Validation Layer** | Schema enforcement on LLM output, fallback variable selection | Cleaned `ParsedIntent` | `DataFrame` column list |
@@ -175,11 +175,20 @@ POST /simulate  { variable: string, delta: float, file_id: string }
 
 ```
 <AppLayout>
-  <Header>              — dataset name badge, upload button
-  <Main>
-    <ChatPanel>         — <MessageList> <SuggestedPrompts> <InputBox>
-    <InsightPanel>      — <SummaryCard> <DriverChart> <RecommendationCard> <ModelInfoCollapse>
-  <SimulationBar>       — <VariableSelect> <DeltaSlider> <SimulateButton> <ResultBadge>
+  <Sidebar>                — vertical left nav (68px collapsed, 180px expanded), light background with blue gradient, shadow divider
+    <SidebarItem: Upload>   — ➕ icon, always active, path: /app
+    <SidebarItem: AI Chat>  — 🗨️ icon, gated until first upload, path: /app/chat
+    <SidebarItem: DataViewer> — 📊 icon, gated until first upload, path: /app/viewer
+    <SidebarItem: Monitor>   — 📈 icon, gated until first upload, path: /app/monitor
+    <SidebarItem: History>    — 📋 icon, always active, path: /app/history
+    <SidebarSpacer>
+    <SidebarItem: Account>  — user initials, always active
+  <ContentArea>             — renders active view based on URL [[...slug]] catch-all route
+    <UploadView>            — <UploadZone> <UploadHistory>               (/app)
+    <ChatView>              — <ChatPanel> <InsightPanel> <SimulationBar> (/app/chat)
+    <DataViewerView>        — <FileTabs> <FileContentEditor>             (/app/viewer)
+    <MonitorView>           — <MonitorTabs: Data Analysis | Impact Analysis> <RibbonMenu> <ResultArea> (/app/monitor, /app/monitor/data-analysis, /app/monitor/impact-analysis)
+    <HistoryView>           — <HistoryTabs: AI Chat | Data Edits | Monitor> (/app/history/chat, /app/history/viewer, /app/history/monitor)
 ```
 
 ---
@@ -268,7 +277,8 @@ bucket/
 | Single concurrent user | Stateless design; in-memory dict is not thread-safe for concurrent writes. Acceptable for hackathon; production would need per-request state isolation |
 
 **Hard limits (v1):**
-- Maximum file size: 10 MB (enforced in `POST /upload`)
+- Maximum file size: 20 MB (enforced in `POST /upload`)
+- Maximum files per upload: 5
 - Maximum bootstrap samples: 200
 - Maximum LLM tokens per request: 1000 (system + user prompt combined)
 - Maximum features surfaced in response: 5 (top N by absolute coefficient)
@@ -363,6 +373,8 @@ Zero egress fees, S3-compatible API (uses `boto3`), and 10 GB free storage. Supe
 | **ADR-0001** | `.docs/more/adrs/0001-clerk-authentication.md` | `proposed` |
 | **ADR-0002** | `.docs/more/adrs/0002-supabase-metadata.md` | `proposed` |
 | **ADR-0003** | `.docs/more/adrs/0003-cloudflare-r2-storage.md` | `proposed` |
+| **ADR-0004** | `.docs/more/adrs/0004-canva-sidebar-navigation.md` | `proposed` |
+| **ADR-0005** | `.docs/more/adrs/0005-chat-history-persistence.md` | `proposed` |
 
 ---
 

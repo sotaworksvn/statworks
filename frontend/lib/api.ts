@@ -42,7 +42,7 @@ export async function syncUser(
   email?: string,
   name?: string
 ): Promise<{ id: string | null; synced: boolean }> {
-  const res = await fetch(`${getBaseUrl()}/sync-user`, {
+  const res = await fetch(`${getBaseUrl()}/api/auth/sync-user`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ clerk_user_id: clerkUserId, email, name }),
@@ -68,7 +68,7 @@ export async function uploadFile(
     headers["x-clerk-user-id"] = clerkUserId;
   }
 
-  const res = await fetch(`${getBaseUrl()}/upload`, {
+  const res = await fetch(`${getBaseUrl()}/api/upload`, {
     method: "POST",
     headers,
     body: form,
@@ -92,7 +92,7 @@ export async function analyzeDataset(
     headers["x-clerk-user-id"] = clerkUserId;
   }
 
-  const res = await fetch(`${getBaseUrl()}/analyze`, {
+  const res = await fetch(`${getBaseUrl()}/api/chat/analyze`, {
     method: "POST",
     headers,
     body: JSON.stringify({ file_id: fileId, query }),
@@ -117,7 +117,7 @@ export async function simulateScenario(
     headers["x-clerk-user-id"] = clerkUserId;
   }
 
-  const res = await fetch(`${getBaseUrl()}/simulate`, {
+  const res = await fetch(`${getBaseUrl()}/api/monitor/simulate`, {
     method: "POST",
     headers,
     body: JSON.stringify({ file_id: fileId, variable, delta }),

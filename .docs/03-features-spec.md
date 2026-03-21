@@ -6,7 +6,7 @@
 | **Team**         | Phú Nhuận Builder x SOTA Works       |
 | **Project**      | SOTA StatWorks                       |
 | **Created**      | 2026-03-20                           |
-| **Last updated** | 2026-03-20                           |
+| **Last updated** | 2026-03-21                           |
 | **PRD**          | `.docs/01-prd.md`                    |
 | **System Design**| `.docs/02-system-design.md`          |
 
@@ -16,11 +16,15 @@
 
 | # | Feature | Endpoint(s) | Status |
 |---|---|---|---|
-| F-01 | [Data Ingestion](#f-01-data-ingestion) | `POST /upload` | `draft` |
-| F-02 | [AI-Powered Driver Analysis](#f-02-ai-powered-driver-analysis) | `POST /analyze` | `draft` |
-| F-03 | [Scenario Simulation](#f-03-scenario-simulation) | `POST /simulate` | `draft` |
-| F-04 | [Frontend — Single-Screen Decision Interface](#f-04-frontend--single-screen-decision-interface) | — (Next.js) | `draft` |
+| F-01 | [Data Ingestion](#f-01-data-ingestion) | `POST /api/upload` | `draft` |
+| F-02 | [AI-Powered Driver Analysis](#f-02-ai-powered-driver-analysis) | `POST /api/chat/analyze` | `draft` |
+| F-03 | [Scenario Simulation](#f-03-scenario-simulation) | `POST /api/monitor/simulate` | `draft` |
+| F-04 | [Frontend — Sidebar Navigation Interface](#f-04-frontend--sidebar-navigation-interface) | — (Next.js) | `draft` |
 | F-05 | [Authentication & Identity](#f-05-authentication--identity) | — (Clerk + Supabase) | `draft` |
+| F-06 | [Data Viewer](#f-06-data-viewer) | `GET /api/data/{id}/content` | `draft` |
+| F-07 | [Monitor (Data Analysis / Impact Analysis)](#f-07-monitor-dashboard) | — (Frontend) | `draft` |
+| F-08 | [Upload History](#f-08-upload-history) | `GET /datasets` | `draft` |
+| F-09 | [Chat History](#f-09-chat-history) | `GET/POST /api/chat/conversations`, `GET/POST /api/chat/conversations/{id}/messages` | `draft` |
 
 ---
 
@@ -31,7 +35,7 @@
 | Field | Value |
 |---|---|
 | **Status** | `draft` |
-| **Endpoint** | `POST /upload` |
+| **Endpoint** | `POST /api/upload` |
 | **PRD reference** | PRD §5 Scope — Data ingestion |
 | **System Design ref** | SD §4.4 Data Ingestion Layer, SD §6.2 Data Architecture |
 
@@ -53,24 +57,25 @@ The Data Ingestion feature is the entry point of every user session. It accepts 
 
 | ID | Requirement |
 |---|---|
-| FR-01-01 | The endpoint `POST /upload` MUST accept multipart form-data with one or more files in a single request. |
+| FR-01-01 | The endpoint `POST /upload` MUST accept multipart form-data with one or more files in a single request. Up to 5 files per request. |
 | FR-01-02 | Supported primary data formats: `.xlsx`, `.csv`. These MUST be parsed into a `pandas.DataFrame`. |
 | FR-01-03 | Supported context formats: `.docx`, `.pptx`. These MUST be parsed as plain text strings only (no formatting, no media). |
-| FR-01-04 | Only one primary data file (`.xlsx` or `.csv`) is allowed per upload. If multiple primary files are submitted, return HTTP 422 with a descriptive error. |
-| FR-01-05 | The endpoint MUST return a unique `file_id` (UUID v4) on success. |
+| FR-01-04 | Multiple primary data files (`.xlsx`/`.csv`) are allowed per upload (up to 5 total files). Each primary file creates its own in-memory entry with a unique `file_id`. |
+| FR-01-05 | The endpoint MUST return a unique `file_id` (UUID v4) per primary file on success. For multi-file uploads, return a list of file results. |
 | FR-01-06 | The parsed `DataFrame` and its column metadata MUST be stored in-memory under the returned `file_id`. |
-| FR-01-07 | Extracted context text (from `.docx`/`.pptx`) MUST be stored alongside the `DataFrame` under the same `file_id`. |
-| FR-01-08 | The endpoint MUST reject files exceeding 10 MB with HTTP 413. |
+| FR-01-07 | Extracted context text (from `.docx`/`.pptx`) MUST be stored alongside each primary `DataFrame` under the same `file_id`. |
+| FR-01-08 | The endpoint MUST reject files exceeding 20 MB with HTTP 413. |
 | FR-01-09 | The endpoint MUST reject unsupported file extensions with HTTP 415 and a clear message listing supported types. |
 | FR-01-10 | Column names MUST be normalised (stripped of leading/trailing whitespace; no modification to casing). |
 | FR-01-11 | Column types MUST be auto-detected. Numeric columns and non-numeric columns must be flagged in the metadata response. |
 | FR-01-12 | The response MUST include: `file_id`, `columns` (list of `{name, dtype, is_numeric}`), `row_count`, `context_extracted` (bool). |
+| FR-01-13 | A SHA-256 content hash MUST be computed for each uploaded file for deduplication. |
 
 ### 2.2 Non-Functional Requirements
 
 | ID | Requirement |
 |---|---|
-| NFR-01-01 | Upload and parse time MUST complete in < 3 seconds for files up to 10 MB. |
+| NFR-01-01 | Upload and parse time MUST complete in < 3 seconds for files up to 20 MB. |
 | NFR-01-02 | In-memory store MUST be capped at 10 active `file_id` entries. When the cap is reached, the oldest entry (insertion order) is evicted (LRU policy). |
 | NFR-01-03 | The stored `DataFrame` MUST NOT be written to disk. All data is ephemeral per process lifetime. |
 | NFR-01-04 | The in-memory store MUST be protected by a shared `asyncio.Lock` to prevent race conditions when multiple requests write concurrently. |
@@ -1053,4 +1058,313 @@ User → returns to app (already logged in via Clerk session)
 |---|---|---|
 | OP-F05-1 | Should the backend verify the Clerk JWT or trust the `x-clerk-user-id` header? | (a) Trust header (simpler, faster); (b) Verify JWT server-side (more secure, adds Clerk SDK dependency) |
 | OP-F05-2 | Should Supabase RLS be enabled for v1 demo? | (a) Yes — enforce row-level access; (b) No — service key bypasses RLS, simpler for demo |
-| OP-F05-3 | Should the frontend show a dataset history list, or just auto-load the last dataset? | (a) Show list; (b) Auto-load last only |
+| OP-F05-3 | ~~Should the frontend show a dataset history list, or just auto-load the last dataset?~~ | **Resolved: Show list (F-08 Upload History)** |
+
+---
+
+---
+
+# F-06: Data Viewer
+
+| Field | Value |
+|---|---|
+| **Status** | `draft` |
+| **Endpoint** | `GET /datasets/{id}/content`, `PUT /datasets/{id}/content` |
+| **PRD reference** | PRD §5 Scope — Frontend — Data Viewer |
+| **System Design ref** | SD §4.5 Frontend Component Tree |
+| **ADR reference** | ADR-0004 (Canva Sidebar Navigation) |
+
+---
+
+## 1. Overview
+
+The Data Viewer provides a browser-tab-style interface for inspecting and editing all uploaded files. Each uploaded file appears as a horizontal tab. Clicking a tab displays that file's content in an editable area.
+
+---
+
+## 2. Requirements
+
+### 2.1 Functional Requirements
+
+| ID | Requirement |
+|---|---|
+| FR-06-01 | All uploaded files (Excel, Word, PowerPoint) MUST appear as horizontal tabs above the content area. |
+| FR-06-02 | The active tab MUST be visually distinguished (highlighted background, underline accent). |
+| FR-06-03 | Excel files (.xlsx, .csv) MUST render as a table with editable cells (HTML table with contentEditable). |
+| FR-06-04 | Word files (.docx) MUST render as editable text content in a textarea. |
+| FR-06-05 | PowerPoint files (.pptx) MUST render as read-only extracted text per slide (numbered slides). |
+| FR-06-06 | Tabs MUST support reordering via drag-and-drop (optional for v1). |
+| FR-06-07 | A close (×) button on each tab MUST remove that file from the viewer (not from storage). |
+| FR-06-08 | Editing a cell or text MUST update the in-memory data. Changes are ephemeral (not persisted to R2 in v1). |
+
+### 2.2 Non-Functional Requirements
+
+| ID | Requirement |
+|---|---|
+| NFR-06-01 | Tab switching MUST feel instant (<100ms render). |
+| NFR-06-02 | Tables with up to 500 rows × 25 columns MUST render without scrolling jank. |
+
+### 2.3 Acceptance Criteria
+
+- Upload 3 files → 3 tabs visible in Data Viewer.
+- Click tab 2 → content switches to file 2.
+- Edit a cell → value is updated in the table.
+- Close tab → tab disappears, another tab becomes active.
+
+---
+
+---
+
+# F-07: SPSS/SmartPLS Dashboard
+
+| Field | Value |
+|---|---|
+| **Status** | `draft` |
+| **Endpoint** | Wraps `POST /analyze`, `POST /simulate` |
+| **PRD reference** | PRD §5 Scope — Frontend — Dashboard |
+| **System Design ref** | SD §4.5 Frontend Component Tree |
+| **ADR reference** | ADR-0004 (Canva Sidebar Navigation) |
+
+---
+
+## 1. Overview
+
+The Dashboard provides a professional statistical software experience with two horizontal tabs: **SPSS** and **SmartPLS**. Each tab features a ribbon-style menu bar mimicking the real software, with actions that trigger the existing backend engines.
+
+---
+
+## 2. Requirements
+
+### 2.1 Functional Requirements
+
+| ID | Requirement |
+|---|---|
+| FR-07-01 | Two horizontal tabs MUST be displayed: "SPSS" and "SmartPLS". |
+| FR-07-02 | **SPSS tab** MUST show a ribbon menu with categories: Analyze, Data, Graphs. |
+| FR-07-03 | Each ribbon button triggers a backend action with pre-configured parameters. |
+| FR-07-04 | SPSS Analyze ribbon: Descriptive Statistics, Frequencies, Correlations, Regression (OLS). |
+| FR-07-05 | SPSS Graphs ribbon: Bar Chart (driver coefficients), Scatter Plot (selected variables). |
+| FR-07-06 | **SmartPLS tab** MUST show a ribbon menu with categories: Model, Assessment, Results. |
+| FR-07-07 | SmartPLS Model ribbon: PLS-SEM Path Model, Bootstrap Analysis. |
+| FR-07-08 | SmartPLS Assessment ribbon: Reliability, Validity, Path Coefficients. |
+| FR-07-09 | SmartPLS Results ribbon: Effects Table, Model Fit Summary. |
+| FR-07-10 | Results from ribbon actions MUST be displayed in a results area below the ribbon. |
+| FR-07-11 | The results area MUST support multiple result panels (stacked vertically, scrollable). |
+
+### 2.2 Non-Functional Requirements
+
+| ID | Requirement |
+|---|---|
+| NFR-07-01 | Ribbon menu MUST visually mimic professional SPSS/SmartPLS appearance (toolbar icons, grouped sections). |
+| NFR-07-02 | Dashboard MUST only be accessible after at least one dataset is uploaded. |
+
+### 2.3 Acceptance Criteria
+
+- Upload a dataset → navigate to Dashboard → see SPSS tab with ribbon menu.
+- Click "Regression" in SPSS ribbon → analysis runs → results display in result area.
+- Switch to SmartPLS tab → see different ribbon menu.
+- Click "PLS-SEM Path Model" → PLS analysis runs → results display.
+
+---
+
+---
+
+# F-08: Upload History
+
+| Field | Value |
+|---|---|
+| **Status** | `draft` |
+| **Endpoint** | `GET /datasets` |
+| **PRD reference** | PRD §4 Need 6, PRD §5 Scope — Upload history |
+| **System Design ref** | SD §6.2 Data Architecture |
+
+---
+
+## 1. Overview
+
+Upload History displays a chronological list of all datasets the authenticated user has uploaded. It supports deduplication: when a file with the same name and same content is re-uploaded, the existing entry's timestamp is updated instead of creating a duplicate.
+
+---
+
+## 2. Requirements
+
+### 2.1 Functional Requirements
+
+| ID | Requirement |
+|---|---|
+| FR-08-01 | The Upload View MUST show a history section listing all previously uploaded datasets. |
+| FR-08-02 | Each history entry MUST display: file name, file type icon, upload date/time. |
+| FR-08-03 | **Same name + same content**: Update the existing entry's upload timestamp; do not create a duplicate. Older entries can be hidden. |
+| FR-08-04 | **Same name + different content**: Treat as distinct files. Both entries are visible with different upload dates. |
+| FR-08-05 | **Different name + same content**: Treat as distinct files. Both entries are visible with different upload dates. |
+| FR-08-06 | **Different name + different content**: Standard handling — distinct files, different upload dates. |
+| FR-08-07 | Clicking a history entry MUST load that dataset into the app (switching to AI Chat view for analysis). |
+| FR-08-08 | History MUST be persisted via Supabase (survives page refreshes and sessions). |
+
+### 2.2 Non-Functional Requirements
+
+| ID | Requirement |
+|---|---|
+| NFR-08-01 | History listing MUST load within 1 second. |
+| NFR-08-02 | Content hash comparison MUST use SHA-256 for deduplication. |
+
+### 2.3 Acceptance Criteria
+
+- Upload `data.xlsx` → appears in history.
+- Re-upload same `data.xlsx` (identical content) → timestamp updates, no duplicate.
+- Upload `data.xlsx` with different content → new entry appears alongside old one.
+- Upload `other.xlsx` with same content as `data.xlsx` → both entries appear.
+- Click history entry → dataset loads, app switches to AI Chat view.
+
+---
+
+---
+
+# F-09: Chat History
+
+| Field | Value |
+|---|---|
+| **Status** | `draft` |
+| **Endpoints** | `GET /conversations`, `POST /conversations`, `GET /conversations/{id}/messages`, `POST /conversations/{id}/messages` |
+| **PRD reference** | PRD §4 Need 7, PRD §5 Scope — Chat history |
+| **System Design ref** | SD §4.5 Frontend Component Tree |
+| **ADR reference** | ADR-0005 (Chat History Persistence) |
+
+---
+
+## 1. Overview
+
+Chat History provides ChatGPT-style persistent conversation management. Each conversation contains a linked dataset, user queries, and AI assistant responses (insights, driver charts, recommendations). Users can browse past conversations, resume them, or start new ones.
+
+---
+
+## 2. Requirements
+
+### 2.1 Functional Requirements
+
+| ID | Requirement |
+|---|---|
+| FR-09-01 | The sidebar MUST display a "History" navigation item (clock icon) below Dashboard. |
+| FR-09-02 | The History view MUST display a chronological list of the user's past conversations (newest first). |
+| FR-09-03 | Each conversation list item MUST display: title, linked file name(s), and last activity timestamp. |
+| FR-09-04 | Conversation title MUST be auto-generated from the first user query or uploaded file name. |
+| FR-09-05 | Clicking a conversation MUST load the full message thread in the Chat view. |
+| FR-09-06 | Each message MUST store: role (`user` or `assistant`), content (text or structured insight JSON), and timestamp. |
+| FR-09-07 | A "New Conversation" button MUST create a fresh conversation and switch to Upload/Chat view. |
+| FR-09-08 | When a user submits a query via `/analyze`, both the user query and the AI response MUST be auto-saved as messages in the active conversation. |
+| FR-09-09 | When a user uploads files, a new conversation MUST be auto-created and the dataset linked. |
+| FR-09-10 | Conversations MUST be persisted via Supabase (survive page refreshes and sessions). |
+| FR-09-11 | Each conversation MUST link to one or more datasets via a join table (`conversation_files`). |
+| FR-09-12 | The History view MUST NOT be gated — it is always accessible even without uploaded data (may show empty state). |
+
+### 2.2 Non-Functional Requirements
+
+| ID | Requirement |
+|---|---|
+| NFR-09-01 | Conversation list MUST load within 1 second. |
+| NFR-09-02 | Loading a conversation's full message thread (up to 100 messages) MUST complete within 2 seconds. |
+| NFR-09-03 | Message saving MUST be async (non-blocking — must not delay the insight response to the user). |
+
+### 2.3 Acceptance Criteria
+
+- Upload a dataset + ask a question → conversation auto-created, visible in History.
+- Click History sidebar item → see list of past conversations.
+- Click a conversation → full thread loads with all messages.
+- Ask follow-up question → new messages appended to same conversation.
+- Start a new conversation → fresh thread, old one preserved.
+- Close browser, re-login → all conversations still visible.
+
+---
+
+## 3. Data Model
+
+### Supabase Tables
+
+```sql
+-- conversations
+id          UUID PRIMARY KEY DEFAULT gen_random_uuid()
+user_id     TEXT NOT NULL        -- clerk_user_id
+title       TEXT NOT NULL        -- auto-generated from first query or file name
+created_at  TIMESTAMPTZ DEFAULT now()
+updated_at  TIMESTAMPTZ DEFAULT now()
+
+-- messages
+id              UUID PRIMARY KEY DEFAULT gen_random_uuid()
+conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE
+role            TEXT NOT NULL CHECK (role IN ('user', 'assistant'))
+content         JSONB NOT NULL   -- { type: 'text', text: '...' } or { type: 'insight', data: InsightResult }
+created_at      TIMESTAMPTZ DEFAULT now()
+
+-- conversation_files (join table)
+conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE
+dataset_id      TEXT NOT NULL    -- links to datasets table
+PRIMARY KEY (conversation_id, dataset_id)
+```
+
+### API Responses
+
+```json
+// GET /conversations
+{
+  "conversations": [
+    {
+      "id": "uuid",
+      "title": "What affects retention?",
+      "file_names": ["survey.xlsx"],
+      "created_at": "2026-03-21T06:00:00Z",
+      "updated_at": "2026-03-21T06:15:00Z",
+      "message_count": 8
+    }
+  ]
+}
+
+// GET /conversations/{id}/messages
+{
+  "conversation_id": "uuid",
+  "messages": [
+    { "id": "uuid", "role": "user", "content": { "type": "text", "text": "What affects retention?" }, "created_at": "..." },
+    { "id": "uuid", "role": "assistant", "content": { "type": "insight", "data": { ... InsightResult ... } }, "created_at": "..." }
+  ]
+}
+```
+
+---
+
+## 4. Flows
+
+### 4.1 New Conversation Flow
+
+```
+User uploads file(s)
+  → POST /upload (existing)
+  → POST /conversations { title: filename, dataset_ids: [file_id] }
+  → Conversation created, app switches to Chat view
+  → User asks question
+  → POST /conversations/{id}/messages { role: 'user', content: { type: 'text', text: query } }
+  → POST /analyze { file_id, query }
+  → Response received
+  → POST /conversations/{id}/messages { role: 'assistant', content: { type: 'insight', data: response } }
+```
+
+### 4.2 Resume Conversation Flow
+
+```
+User clicks conversation in History
+  → GET /conversations/{id}/messages
+  → Messages rendered in Chat view
+  → Linked dataset loaded from store/Supabase
+  → User can ask follow-up questions (appended to same conversation)
+```
+
+---
+
+## 5. Technology Decisions
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Storage | Supabase PostgreSQL | Already in use; free tier sufficient (500MB = ~500K messages) |
+| Message format | JSONB `content` column | Flexible: supports plain text queries AND structured InsightResult objects |
+| Title generation | First user query, truncated to 80 chars | Simple, no LLM cost, user-recognisable |
+| Conversation creation | Auto on upload | Every upload starts a new analysis session |
+| Persistence timing | Async, non-blocking | Must not delay insight delivery to user |
+

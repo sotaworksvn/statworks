@@ -1,36 +1,62 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SOTA StatWorks — Frontend
 
-## Getting Started
+> AI-powered statistical decision engine — *"From Data to Decisions, Instantly."*
 
-First, run the development server:
+## Quick Start
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd frontend && npm install
+npm run dev          # → http://localhost:3000
+npx tsc --noEmit     # Type-check
+npm run build        # Production build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Tech Stack
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Technology | Purpose |
+|---|---|
+| Next.js 16 (App Router) | Framework |
+| React 19 + TypeScript 5 | UI + type safety |
+| Tailwind CSS 4 | Styling |
+| Zustand 5 | Global state management |
+| React Query 5 | Server state / mutations |
+| Recharts 3.8 | Driver ranking charts |
+| Framer Motion 12 | Micro-animations |
+| Clerk 7 | Authentication (Google OAuth) |
+| shadcn/ui 4 | Accessible UI components |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## URL Routes
 
-## Learn More
+| Route | View |
+|---|---|
+| `/` | Landing page |
+| `/app` | Upload |
+| `/app/chat` | AI Chat |
+| `/app/viewer` | Data Viewer |
+| `/app/monitor` | Monitor (Data Analysis) |
+| `/app/monitor/data-analysis` | Monitor → Data Analysis |
+| `/app/monitor/impact-analysis` | Monitor → Impact Analysis |
+| `/app/history/chat` | History → AI Chat |
+| `/app/history/viewer` | History → Data Edits |
+| `/app/history/monitor` | History → Monitor |
 
-To learn more about Next.js, take a look at the following resources:
+## Environment Variables
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```dotenv
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Deploy
 
-## Deploy on Vercel
+Deployed to **Vercel** via `git push main`. Set env vars in Vercel dashboard.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Team — Phú Nhuận Builder x SOTA Works
+
+| Name | Role |
+|---|---|
+| Nguyễn Ngọc Gia Bảo | Team Leader · Backend Dev · Frontend Dev · OpenAI API Integration |
+| Đặng Đình Tiến | Vice Leader · Frontend Dev · Tester |
+| Đỗ Phúc Duy | Frontend Dev · Tester · Pitching Personnel |

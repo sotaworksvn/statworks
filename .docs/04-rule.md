@@ -5,7 +5,7 @@
 | **Project**      | SOTA StatWorks                      |
 | **Team**         | Phú Nhuận Builder x SOTA Works      |
 | **Created**      | 2026-03-20                          |
-| **Last updated** | 2026-03-20                          |
+| **Last updated** | 2026-03-21                          |
 | **Source docs**  | `.docs/01-prd.md` · `.docs/02-system-design.md` · `.docs/03-features-spec.md` |
 
 ---
@@ -43,9 +43,18 @@
 
 ---
 
-### Rule: Three core endpoints plus infrastructure endpoints
+### Rule: All endpoints under `/api/*` prefix, grouped by page/feature
 
-**What:** The backend exposes three core computation endpoints: `POST /upload`, `POST /analyze`, `POST /simulate`. Additionally, the following infrastructure endpoints are permitted: `GET /health`, `POST /upload/presign` (R2 presigned URL generation), `GET /datasets` (user dataset listing). Do not add new computation endpoints without explicit scope change in the PRD.
+**What:** All backend endpoints MUST use the `/api/*` prefix and be grouped by page/feature using FastAPI `APIRouter` with prefixes:
+- `/api/upload` — Upload: `POST /api/upload`, `POST /api/upload/presign`
+- `/api/chat` — AI Chat: `POST /api/chat/analyze`, `GET/POST /api/chat/conversations`
+- `/api/data` — Data Viewer: `GET /api/data/{id}/content`, `PATCH /api/data/{id}/cells`
+- `/api/monitor` — Monitor: `POST /api/monitor/simulate`
+- `/api/history` — History: `GET/POST /api/history`, `GET /api/history/{id}`, `GET /api/history/export-pdf`
+- `/api/auth` — Authentication: `POST /api/auth/sync-user`
+- `/api/health` — Health check: `GET /api/health`
+
+Do not add new computation endpoints without explicit scope change in the PRD.
 
 **Why:** Minimal surface area reduces demo failure risk within the 20–30h build window. Every new endpoint needs error handling, documentation, and testing.
 
@@ -590,11 +599,11 @@ const { summary, drivers } = data  // data is `any`
 
 ---
 
-### Rule: One screen, five components — do not add pages
+### Rule: Sidebar navigation with five views + URL routing — see ADR-0004, ADR-0005
 
-**What:** The application has exactly one page (`app/page.tsx`). All UI lives in five components: `<Header>`, `<ChatPanel>`, `<InsightPanel>`, `<SimulationBar>`, and sub-components within each. Do not create new `app/` routes or pages without a PRD scope change.
+**What:** The application uses a Canva-inspired vertical sidebar navigation with five main views: Upload, AI Chat, Data Viewer, Monitor, and History. The sidebar has a light white-to-blue gradient background with a shadow divider. Logo toggles between `icon.png` (collapsed) and `logo.png` (expanded). Views are routed via a Next.js catch-all route `app/app/[[...slug]]/page.tsx` that syncs URL ↔ Zustand `activeView`. The sidebar uses `router.push` to update the browser address bar. Routes: `/app` (Upload), `/app/chat`, `/app/viewer`, `/app/monitor`, `/app/monitor/data-analysis`, `/app/monitor/impact-analysis`, `/app/history/chat`, `/app/history/viewer`, `/app/history/monitor`.
 
-**Why:** The PRD mandates a single-screen paradigm. Multi-page navigation reduces the demo wow factor and increases the surface area where navigation errors can occur.
+**Why:** The product has expanded to include Data Viewer, Monitor (Data Analysis + Impact Analysis), and Chat History, which each need full-screen space. A sidebar provides persistent navigation context. URL routing enables browser back/forward and bookmark support. See ADR-0004 for navigation rationale, ADR-0005 for chat history persistence.
 
 ---
 

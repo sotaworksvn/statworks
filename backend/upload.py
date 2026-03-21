@@ -29,7 +29,8 @@ router = APIRouter()
 ALLOWED_PRIMARY = {".xlsx", ".csv"}
 ALLOWED_CONTEXT = {".docx", ".pptx"}
 ALLOWED_ALL = ALLOWED_PRIMARY | ALLOWED_CONTEXT
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+MAX_FILES_PER_UPLOAD = 5
 
 
 # ---------------------------------------------------------------------------
@@ -182,11 +183,21 @@ async def upload_presign(body: PresignRequest, request: Request) -> PresignRespo
 async def upload(request: Request, files: list[UploadFile] = File(...)) -> UploadResponse:
     """Accept one or more files, parse data and context, return metadata.
 
-    Phase 1.5: also persists to R2 + Supabase asynchronously if available.
+    Phase 1.5+: supports up to 5 files per request, 20MB each.
+    Multiple primary files (Excel/CSV) are allowed — the first one is used as the
+    main dataset. Context files (.docx/.pptx) are combined.
+    Also persists to R2 + Supabase asynchronously if available.
     """
 
     # Extract user identity (None for anonymous)
     clerk_user_id = get_current_user_id(request)
+
+    # 0. File count check
+    if len(files) > MAX_FILES_PER_UPLOAD:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Maximum {MAX_FILES_PER_UPLOAD} files per upload. Got {len(files)}.",
+        )
 
     # 1. Read all files and validate extensions + sizes
     file_data: list[tuple[str, str, bytes]] = []  # (filename, ext, content)
@@ -208,25 +219,20 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
         if len(content) > MAX_FILE_SIZE:
             raise HTTPException(
                 status_code=413,
-                detail=f"File '{filename}' exceeds the 10 MB limit.",
+                detail=f"File '{filename}' exceeds the 20 MB limit.",
             )
 
         file_data.append((filename, ext, content))
 
-    # 2. Enforce exactly one primary file
+    # 2. Separate primary and context files
     primary_files = [(fn, ext, data) for fn, ext, data in file_data if ext in ALLOWED_PRIMARY]
     if len(primary_files) == 0:
         raise HTTPException(
             status_code=422,
             detail="No primary data file (.xlsx or .csv) provided. At least one is required.",
         )
-    if len(primary_files) > 1:
-        raise HTTPException(
-            status_code=422,
-            detail="Only one primary data file (.xlsx or .csv) is allowed per upload.",
-        )
 
-    # 3. Parse primary file
+    # 3. Parse the first primary file as the main dataset
     primary_fn, primary_ext, primary_content = primary_files[0]
     if primary_ext == ".xlsx":
         df = _parse_excel(primary_content)
@@ -251,6 +257,10 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
     row_count = len(df)
     file_id = str(uuid.uuid4())
 
+    # 5b. Compute content hash (SHA-256) for deduplication
+    import hashlib
+    content_hash = hashlib.sha256(primary_content).hexdigest()
+
     # 6. Build R2 key (if user is authenticated)
     r2_key: str | None = None
     if clerk_user_id and r2.is_available():
@@ -265,6 +275,9 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
         context_text=context_text,
         r2_key=r2_key,
         user_id=clerk_user_id,
+        content_hash=content_hash,
+        file_name=primary_fn,
+        file_type=primary_ext,
     )
     await set_entry(entry)
 

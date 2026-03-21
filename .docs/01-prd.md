@@ -6,8 +6,8 @@
 | **Team**     | Phú Nhuận Builder x SOTA Works |
 | **Project**  | SOTA StatWorks               |
 | **Created**  | 2026-03-20                   |
-| **Last updated** | 2026-03-20               |
-| **Version**  | 0.2                          |
+| **Last updated** | 2026-03-21               |
+| **Version**  | 0.5                          |
 
 ---
 
@@ -107,22 +107,49 @@ A hackathon judge logs in via Google, uploads a dataset, reviews insights, then 
 
 ---
 
+### Need 6 — Manage uploaded datasets with history and deduplication
+
+> "I upload data frequently. I want to see what I've uploaded before, and I don't want duplicates cluttering my workspace."
+
+**Scenario — Returning analyst:**
+An analyst who has uploaded multiple datasets over several sessions returns to the app. She sees a history of all her uploads with timestamps. When she re-uploads the same file (same name, same content), the system simply updates the timestamp — no duplicate entry. When she uploads a file with the same name but different content, both versions are preserved as distinct entries with different upload dates. When she uploads a file with a different name but same content, both are also kept as separate entries.
+
+---
+
+### Need 7 — Review past conversations and resume analysis
+
+> "I had a great analysis session yesterday. I want to scroll back through my questions and the system's answers without re-running everything."
+
+**Scenario — Returning user:**
+A business analyst opens the app after a day off. In the sidebar, she sees a list of past conversations — each titled by her first question or the uploaded file name. She clicks on "Customer Retention Analysis — Mar 20" and immediately sees the full chat thread: her queries, the system's insight summaries, driver charts, and recommendations. The uploaded dataset is still linked. She can continue asking follow-up questions in the same thread or start a new conversation.
+
+---
+
 ## 5. Scope
 
 ### In Scope (v1 — Hackathon Demo)
 
 | Area | What is included |
 |---|---|
-| **Data ingestion** | Upload of `.xlsx`, `.csv` (primary data); `.docx`, `.pptx` (context/text extraction only) |
+| **Data ingestion** | Upload of `.xlsx`, `.csv` (primary data); `.docx`, `.pptx` (context/text extraction only). Up to 5 files per upload, max 20MB per file. Multiple Excel files allowed. |
 | **Statistical engine** | OLS regression (SPSS-style) and PLS-SEM (SmartPLS-style), auto-selected via scoring function |
 | **AI layer** | LLM-powered intent parsing and variable extraction via `gpt-5.4-mini` (Call 1); insight generation via `gpt-5.4` (Call 2). Accessed via OpenAI API with sponsored credits. |
 | **Scenario simulation** | Single-variable delta propagation (1-hop and multi-hop via directed graph) |
-| **Core endpoints** | `POST /upload`, `POST /analyze`, `POST /simulate` |
-| **Authentication** | Clerk-based Google OAuth login; session management; user identity passed to backend via `x-clerk-user-id` header |
-| **Metadata persistence** | Supabase (PostgreSQL) for user records, dataset metadata, and analysis results |
+| **Core endpoints** | All under `/api/*` prefix. Upload: `POST /api/upload`. Chat: `POST /api/chat/analyze`, `GET/POST /api/chat/conversations`. Data: `GET /api/data/{id}/content`, `PATCH /api/data/{id}/cells`. Monitor: `POST /api/monitor/simulate`. History: `GET/POST /api/history`, `GET /api/history/export-pdf`. Auth: `POST /api/auth/sync-user`. Health: `GET /api/health`. |
+| **Authentication** | Clerk-based Google OAuth login; session management; user identity passed to backend via `x-clerk-user-id` header. Login required before accessing any feature. |
+| **Metadata persistence** | Supabase (PostgreSQL) for user records, dataset metadata, analysis results, conversations, and messages |
 | **Object storage** | Cloudflare R2 for raw dataset files and analysis output; presigned URL upload/download |
-| **Frontend** | Single-screen Next.js app: Chat panel (input), Insight panel (output), Simulation bar (bottom), identity-aware UI |
-| **UX** | Progressive reveal, micro-animations, slider-based simulation, no statistics jargon in default view, persistent session resume |
+| **Frontend — Sidebar Navigation** | Canva-inspired vertical sidebar with 5 main views + user account. See ADR-0004, ADR-0005. |
+| **Frontend — Upload View** | Multi-file drag-and-drop upload zone + upload history with deduplication |
+| **Frontend — AI Chat View** | Chat panel (input), Insight panel (output), Simulation bar (bottom), message history per conversation |
+| **Frontend — Data Viewer** | Browser-tab-style file viewer with in-place content editing for all uploaded files |
+| **Frontend — Dashboard** | Monitor page with Data Analysis (SPSS) and Impact Analysis (SmartPLS) tabs, ribbon menus, result area |
+| **Frontend — Chat History** | ChatGPT-style conversation list in sidebar. Each conversation includes linked files and full message history. |
+| **Frontend — History System** | Autosave for 3 data types (Chat, Data Viewer, Dashboard) with 3-tab ribbon UI, time filter (date range + presets), and entry restoration. See ADR-0006. |
+| **PDF Report Export** | AI-analyzed session report via `GET /api/history/export-pdf`. LLM synthesizes history → Markdown-to-rich-text conversion → ReportLab generates A4 PDF (Helvetica/Arial). See ADR-0007. |
+| **UX** | Progressive reveal, micro-animations, slider-based simulation, no statistics jargon, persistent session resume, gated feature access, light sidebar with blue gradient and shadow divider, URL-based browser routing (`/app/chat`, `/app/viewer`, `/app/monitor/*`, `/app/history/*`) |
+| **Upload history** | Deduplicated upload history per user. Same name + same content = update timestamp. Same name + different content = separate entries. |
+| **Chat history** | Persistent conversation history per user. Each conversation has a title (auto-generated from first query or file name), linked datasets, and full message thread (user + assistant). |
 | **Insight output** | Summary sentence, ranked driver chart, actionable recommendation card, collapsible model details |
 | **Reliability** | LLM retry (×2), validation layer filtering hallucinated variables, hard fallback to regression + top numeric columns |
 
@@ -131,12 +158,13 @@ A hackathon judge logs in via Google, uploads a dataset, reviews insights, then 
 | Exclusion | Rationale |
 |---|---|
 | Full academic PLS (HTMT, AVE, discriminant validity reports) | Over-engineered for demo; adds complexity without decision value |
-| Multi-page or tabbed navigation | Violates single-screen paradigm; reduces wow factor |
+| Vertical tab navigation | Only horizontal tabs are supported in this version |
 | Real-time / streaming data ingestion | Outside the 20–30h build window |
-| Automated report PDF generation | Nice-to-have; deferred to future version |
+| ~~Automated report PDF generation~~ | **Moved to In Scope — see ADR-0007: PDF Export** |
 | Celery / Redis async queue (bootstrap > 500) | Optional; only added if bootstrap performance is a bottleneck |
-| Chat conversation history / memory | Stateless MVP is sufficient for demo |
+| ~~Chat conversation history / memory~~ | **Moved to In Scope — see F-09: Chat History** |
 | Multi-language UI (i18n) | English-only for v1 |
+| Sidebar "Template", "Brand", "More" items | No function mapping decided yet; removed from sidebar |
 
 ---
 
@@ -204,6 +232,9 @@ A hackathon judge logs in via Google, uploads a dataset, reviews insights, then 
 | ADR-0001 — Clerk Authentication | `.docs/more/adrs/0001-clerk-authentication.md` | `proposed` |
 | ADR-0002 — Supabase Metadata | `.docs/more/adrs/0002-supabase-metadata.md` | `proposed` |
 | ADR-0003 — Cloudflare R2 Storage | `.docs/more/adrs/0003-cloudflare-r2-storage.md` | `proposed` |
+| ADR-0004 — Canva Sidebar Navigation | `.docs/more/adrs/0004-canva-sidebar-navigation.md` | `proposed` |
+| ADR-0006 — History Autosave | `.docs/more/adrs/0006-history-autosave.md` | `proposed` |
+| ADR-0007 — PDF Export | `.docs/more/adrs/0007-pdf-export.md` | `proposed` |
 
 ### Downstream Specs
 
