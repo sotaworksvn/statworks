@@ -5,6 +5,17 @@ import { useAppStore } from "@/lib/store";
 import { useUser } from "@clerk/nextjs";
 import { useRouter, useParams } from "next/navigation";
 
+const HAS_CLERK_KEY = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+/** Safe useUser — returns anonymous defaults when ClerkProvider is absent */
+function useSafeUser() {
+  if (HAS_CLERK_KEY) {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    return useUser();
+  }
+  return { user: null };
+}
+
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 
 type HistoryTab = "chat" | "data" | "dashboard";
@@ -29,7 +40,7 @@ const TABS: { key: HistoryTab; icon: string; label: string; urlSlug: string }[] 
 
 export function HistoryView() {
   const { setActiveView } = useAppStore();
-  const { user } = useUser();
+  const { user } = useSafeUser();
   const router = useRouter();
   const params = useParams();
   const slug = params.slug as string[] | undefined;
@@ -106,7 +117,9 @@ export function HistoryView() {
       const qs = params.toString();
 
       const url = `${backendUrl}/api/history/export-pdf${qs ? "?" + qs : ""}`;
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        headers: user?.id ? { "x-clerk-user-id": user.id } : {},
+      });
 
       if (!response.ok) {
         const errText = await response.text();

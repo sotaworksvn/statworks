@@ -49,7 +49,7 @@ export interface DriverResult {
 export interface DecisionTrace {
   readonly score_pls: number;
   readonly score_reg: number;
-  readonly engine_selected: "regression" | "pls";
+  readonly engine_selected: "regression" | "pls" | null;
   readonly reason: string;
 }
 

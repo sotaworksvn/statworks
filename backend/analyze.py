@@ -99,10 +99,14 @@ async def analyze(body: AnalyzeRequest) -> AnalyzeResponse:
         # Step 2b: LLM Call 1 — intent parsing (gpt-5.4-mini)
         #          On failure → Layer 1 fallback (auto-select features)
         # ---------------------------------------------------------------
+        # Prepare sample data for LLM (first 5 rows, helps with format-aware edits)
+        sample_rows = df.head(5).where(df.head(5).notna(), None).to_dict(orient="records")
+
         parsed = await parse_user_intent(
             query=body.query,
             column_names=column_names,
             context_text=entry.context_text,
+            sample_rows=sample_rows,
         )
 
         # ---------------------------------------------------------------
@@ -583,12 +587,17 @@ def _dispatch_direct(intent: str, df: "pd.DataFrame", target: str) -> AnalyzeRes
         )
 
     except Exception as exc:
-        logger.error("Direct analysis failed for intent=%s: %s", intent, exc)
+        _intent = locals().get("intent", "unknown")
+        logger.error("Direct analysis failed for intent=%s: %s", _intent, exc)
+        _fallback_trace = DecisionTrace(
+            score_pls=0.0, score_reg=0.0, engine_selected=None,
+            reason=f"Unexpected error: {exc}",
+        )
         return AnalyzeResponse(
             summary=f"Analysis error: {exc}",
             drivers=[], r2=None,
             recommendation="Please check your dataset and try again.",
-            model_type=None, decision_trace=_no_trace,
+            model_type=None, decision_trace=_fallback_trace,
             result_type="error", table_data=None,
         )
 

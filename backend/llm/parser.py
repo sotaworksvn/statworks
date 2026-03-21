@@ -47,12 +47,23 @@ SYSTEM_PROMPT_PARSE: str = (
     "- If the user asks to compare groups but no suitable grouping column exists, set intent to\n"
     "  'not_supported' and explain in 'not_supported_reason'.\n"
     "- Do not include markdown, code fences, or explanation.\n\n"
+    "CRITICAL DATA EDITING RULES:\n"
+    "- When the user specifies a desired output format (e.g. DD/MM/YYYY, MM-DD-YYYY, etc.), "
+    "you MUST use EXACTLY that format in new_value. Do NOT default to ISO 8601 or any other format.\n"
+    "- Understand the user's intent: if they say 'change dates to DD/MM/YYYY', convert ALL date values "
+    "in that column to the DD/MM/YYYY format. Generate one edit per row.\n"
+    "- If the user says 'change X to Y', produce new_value as literally 'Y' — do not reformat or normalize.\n"
+    "- For bulk edits (e.g. 'change all dates in column X to format Y'), generate edits for EVERY row "
+    "shown in the sample data, using each row's unique identifier.\n"
+    "- Read the sample data values carefully to understand current formats before editing.\n\n"
     "Examples:\n"
     '- "What affects Generosity?" → {"intent":"driver_analysis","target":"Generosity 2019","features":["Trust 2019","Freedom 2019"],"group_by":null,"not_supported_reason":null,"edits":[]}\n'
     '- "Compare Asia vs Europe GDP" (has Region col) → {"intent":"comparison","target":null,"features":["GDP 2019"],"group_by":"Region","not_supported_reason":null,"edits":[]}\n'
     '- "Compare Asia vs Europe" (no region column) → {"intent":"not_supported","target":null,"features":[],"group_by":null,"not_supported_reason":"No region/continent column in dataset","edits":[]}\n'
     '- "Summarize the data" → {"intent":"summary","target":null,"features":[],"group_by":null,"not_supported_reason":null,"edits":[]}\n'
     '- "Change the region of Iran from Middle East to Western Asia" → {"intent":"data_edit","target":null,"features":[],"group_by":null,"not_supported_reason":null,"edits":[{"filter_column":"Country","filter_value":"Iran","column":"Region","new_value":"Western Asia"}]}\n'
+    '- "Change date of row where Country=Japan to 15/03/2024" → {"intent":"data_edit","target":null,"features":[],"group_by":null,"not_supported_reason":null,"edits":[{"filter_column":"Country","filter_value":"Japan","column":"Date","new_value":"15/03/2024"}]}\n'
+    '- "Sửa ngày tháng thành DD/MM/YYYY" (sample: Date col has "2024-01-15") → {"intent":"data_edit","target":null,"features":[],"group_by":null,"not_supported_reason":null,"edits":[{"filter_column":"Country","filter_value":"Japan","column":"Date","new_value":"15/01/2024"},...]}\n'
 )
 
 # Default fallback when LLM fails (Layer 1 fallback)
@@ -74,6 +85,7 @@ async def parse_user_intent(
     query: str,
     column_names: list[str],
     context_text: str | None = None,
+    sample_rows: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Parse user query into structured intent using gpt-5.4-mini.
 
@@ -85,6 +97,8 @@ async def parse_user_intent(
         Column names from the uploaded dataset.
     context_text : str | None
         Optional context text extracted from .docx/.pptx uploads.
+    sample_rows : list[dict] | None
+        Optional first few rows of data to give LLM context about current values/formats.
 
     Returns
     -------
@@ -102,6 +116,15 @@ async def parse_user_intent(
         # Truncate context to first 500 chars to respect token budget
         snippet = context_text[:500]
         user_parts.append(f"Additional context: {snippet}")
+
+    if sample_rows:
+        # Include first few rows so LLM can see current data formats
+        import json
+        sample_str = json.dumps(sample_rows[:3], ensure_ascii=False, default=str)
+        # Cap at 800 chars to stay within token budget
+        if len(sample_str) > 800:
+            sample_str = sample_str[:800] + "..."
+        user_parts.append(f"Sample data (first rows): {sample_str}")
 
     user_parts.append(f"User question: {query}")
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "@/lib/store";
 import { useUser, SignIn } from "@clerk/nextjs";
 import { useRouter, useParams } from "next/navigation";
@@ -14,6 +14,19 @@ import { Dashboard } from "@/components/app/dashboard";
 import { HistoryView } from "@/components/app/history-view";
 import { Toaster } from "@/components/ui/sonner";
 import Image from "next/image";
+
+const HAS_CLERK_KEY = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+/** Safe useUser — returns anonymous defaults when ClerkProvider is absent */
+function useSafeUser() {
+  // When Clerk key exists, ClerkProvider wraps the tree → useUser is safe
+  if (HAS_CLERK_KEY) {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    return useUser();
+  }
+  // No Clerk → anonymous mode, skip auth entirely
+  return { isSignedIn: true as const, isLoaded: true, user: null };
+}
 
 /* ─── URL ↔ View mapping ─────────────────────────────────────────────────── */
 
@@ -74,7 +87,7 @@ function viewToPath(view: ActiveView, subTab?: string): string {
 
 export default function AppPage() {
   const { activeView, setActiveView, fileId } = useAppStore();
-  const { isSignedIn, isLoaded } = useUser();
+  const { isSignedIn, isLoaded } = useSafeUser();
   const router = useRouter();
   const params = useParams();
   const slug = params.slug as string[] | undefined;

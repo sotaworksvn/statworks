@@ -4,6 +4,17 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useAppStore } from "@/lib/store";
 import { useUser } from "@clerk/nextjs";
 
+const HAS_CLERK_KEY = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+/** Safe useUser — returns anonymous defaults when ClerkProvider is absent */
+function useSafeUser() {
+  if (HAS_CLERK_KEY) {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    return useUser();
+  }
+  return { user: null };
+}
+
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 
 interface FileTab {
@@ -28,7 +39,7 @@ const _scrollPositions: Record<string, number> = {};
 
 export function DataViewer() {
   const { uploadedFiles, removeUploadedFile, localParsedData } = useAppStore();
-  const { user } = useUser();
+  const { user } = useSafeUser();
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [tabData, setTabData] = useState<Record<string, TabContent>>({});
   const [closedTabs, setClosedTabs] = useState<Set<string>>(new Set());
@@ -66,6 +77,7 @@ export function DataViewer() {
 
     fetch(`${backendUrl}/api/data/${id}/content?limit=500`, {
       signal: controller.signal,
+      headers: user?.id ? { "x-clerk-user-id": user.id } : {},
     })
       .then((res) => {
         clearTimeout(timeout);
@@ -334,7 +346,10 @@ export function DataViewer() {
                                 // 1. Sync to backend DataFrame via PATCH
                                 fetch(`${backendUrl}/api/data/${activeTabId}/cells`, {
                                   method: "PATCH",
-                                  headers: { "Content-Type": "application/json" },
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                    ...(user?.id ? { "x-clerk-user-id": user.id } : {}),
+                                  },
                                   body: JSON.stringify({
                                     edits: [{ row: i, column: col, value: newVal }],
                                   }),

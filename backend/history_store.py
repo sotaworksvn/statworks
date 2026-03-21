@@ -8,6 +8,7 @@ Persists to a JSON file so history survives server restarts.
 from __future__ import annotations
 
 import json
+import threading
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
@@ -18,6 +19,7 @@ from typing import Any
 
 MAX_PER_CATEGORY = 200
 _PERSIST_FILE = Path(__file__).resolve().parent / ".history_data.json"
+_DISK_LOCK = threading.Lock()  # Protect concurrent disk I/O (Bug #6 fix)
 
 # Session start time — used to scope PDF exports to "this session"
 SESSION_START = datetime.now(timezone.utc).isoformat()
@@ -47,30 +49,32 @@ def _load_from_disk() -> None:
     """Load history from JSON file on disk."""
     if not _PERSIST_FILE.exists():
         return
-    try:
-        raw = json.loads(_PERSIST_FILE.read_text(encoding="utf-8"))
-        for user_id, categories in raw.items():
-            for cat, entries in categories.items():
-                for e in entries:
-                    _store[user_id][cat].append(HistoryEntry(**e))
-    except Exception:
-        pass  # Corrupted file — start fresh
+    with _DISK_LOCK:
+        try:
+            raw = json.loads(_PERSIST_FILE.read_text(encoding="utf-8"))
+            for user_id, categories in raw.items():
+                for cat, entries in categories.items():
+                    for e in entries:
+                        _store[user_id][cat].append(HistoryEntry(**e))
+        except Exception:
+            pass  # Corrupted file — start fresh
 
 
 def _save_to_disk() -> None:
     """Persist history to JSON file."""
-    try:
-        out: dict[str, dict[str, list[dict]]] = {}
-        for user_id, categories in _store.items():
-            out[user_id] = {}
-            for cat, entries in categories.items():
-                out[user_id][cat] = [asdict(e) for e in entries]
-        _PERSIST_FILE.write_text(
-            json.dumps(out, ensure_ascii=False, default=str),
-            encoding="utf-8",
-        )
-    except Exception:
-        pass  # Non-critical — next save will retry
+    with _DISK_LOCK:
+        try:
+            out: dict[str, dict[str, list[dict]]] = {}
+            for user_id, categories in _store.items():
+                out[user_id] = {}
+                for cat, entries in categories.items():
+                    out[user_id][cat] = [asdict(e) for e in entries]
+            _PERSIST_FILE.write_text(
+                json.dumps(out, ensure_ascii=False, default=str),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass  # Non-critical — next save will retry
 
 
 # Load history on module import

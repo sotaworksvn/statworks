@@ -371,21 +371,6 @@ async def list_history(
     return {"entries": entries}
 
 
-@app.get("/api/history/{entry_id}")
-async def get_history_entry(entry_id: str):
-    """Get a single history entry by ID (includes full snapshot)."""
-    entry = _hs_get(entry_id)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="History entry not found")
-    return {
-        "id": entry.id,
-        "category": entry.category,
-        "title": entry.title,
-        "snapshot": entry.snapshot,
-        "created_at": entry.created_at,
-    }
-
-
 @app.post("/api/history")
 async def save_history(body: _HistorySaveRequest, request: Request):
     """Save a history snapshot (autosave from frontend)."""
@@ -456,7 +441,8 @@ async def patch_cells(file_id: str, body: CellEditBatch):
 
 
 # ---------------------------------------------------------------------------
-# PDF Export
+# PDF Export — MUST be registered BEFORE /api/history/{entry_id}
+# to avoid FastAPI route conflict (Bug #1 fix)
 # ---------------------------------------------------------------------------
 
 
@@ -480,12 +466,18 @@ async def export_pdf(
     from fastapi.responses import StreamingResponse
 
     user_id = get_current_user_id(request) or _clerk_user_id or "anonymous"
+    logger.info("export_pdf: resolved user_id=%s (header=%s, qp=%s)",
+                user_id, get_current_user_id(request), _clerk_user_id)
     # Default: only current session (from server start to now)
     effective_from = from_dt or _SESSION_START
     entries = _hs_export(user_id, from_dt=effective_from, to_dt=to_dt)
 
     if not entries:
-        raise HTTPException(status_code=400, detail="No history entries found for the selected time range.")
+        raise HTTPException(
+            status_code=404,
+            detail=f"No history entries found for user '{user_id}' in the selected time range. "
+                   "Make sure you have performed some analyses or edits before exporting.",
+        )
 
     # --- Step 1: Prepare data for LLM ---
     entry_summaries = []
@@ -497,16 +489,12 @@ async def export_pdf(
             "data": json.dumps(e.snapshot, ensure_ascii=False, default=str)[:500],
         })
 
-    # --- Step 2: LLM analysis ---
+    # --- Step 2: LLM analysis (async, with key rotation) ---
     ai_report = ""
     try:
-        from backend.config import OPENAI_API_KEYS
-        from openai import OpenAI
+        from backend.llm.client import call_llm_with_retry, LLMFailureError
 
-        if not OPENAI_API_KEYS:
-            raise ValueError("No OpenAI API keys configured")
-        client = OpenAI(api_key=OPENAI_API_KEYS[0])
-        resp = client.chat.completions.create(
+        llm_result = await call_llm_with_retry(
             model="gpt-5.4-mini",
             messages=[
                 {
@@ -515,15 +503,16 @@ async def export_pdf(
                         "You are a professional data analyst. Analyze the following work session "
                         "history from SOTA StatWorks and produce a concise, well-structured report "
                         "in English. Organize by: Executive Summary, Chat Analysis, Data Changes, "
-                        "Dashboard Insights, and Recommendations. Be thorough but concise."
+                        "Dashboard Insights, and Recommendations. Be thorough but concise.\n\n"
+                        "Return JSON: {\"report\": \"<your full markdown report>\"}"
                     ),
                 },
                 {"role": "user", "content": json.dumps(entry_summaries, ensure_ascii=False, default=str)},
             ],
-            max_completion_tokens=2000,
+            response_format={"type": "json_object"},
         )
-        ai_report = resp.choices[0].message.content or "Report generation completed."
-    except Exception as exc:
+        ai_report = llm_result.get("report", str(llm_result))
+    except (LLMFailureError, Exception) as exc:
         logger.warning("LLM report generation failed: %s", exc)
         ai_report = "AI analysis unavailable. Raw session data is included below."
 
@@ -680,6 +669,25 @@ async def export_pdf(
     except ImportError:
         # reportlab not installed — return plain text fallback
         return {"status": "error", "detail": "reportlab not installed. Run: pip install reportlab"}
+
+
+# ---------------------------------------------------------------------------
+# History entry by ID — MUST be AFTER /api/history/export-pdf (Bug #1 fix)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/history/{entry_id}")
+async def get_history_entry(entry_id: str):
+    """Get a single history entry by ID (includes full snapshot)."""
+    entry = _hs_get(entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="History entry not found")
+    return {
+        "id": entry.id,
+        "category": entry.category,
+        "title": entry.title,
+        "snapshot": entry.snapshot,
+        "created_at": entry.created_at,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -6,10 +6,8 @@ import type { UploadResult, InsightResult, SimulationResult, ApiError } from "./
 function getBaseUrl(): string {
   const url = process.env.NEXT_PUBLIC_BACKEND_URL;
   if (!url) {
-    throw new Error(
-      "NEXT_PUBLIC_BACKEND_URL is not set. " +
-        "Add it to .env.local for development or Vercel project settings for production."
-    );
+    // Fallback for SSR builds and local dev — prevents build crashes
+    return "http://localhost:8000";
   }
   // Strip trailing slash to prevent double-slash URLs (e.g. "//sync-user")
   return url.replace(/\/+$/, "");
