@@ -1,28 +1,16 @@
 "use client";
 
 import { useLocale } from "next-intl";
-import { useRouter, usePathname } from "next/navigation";
 
 export function LanguageSwitcher() {
   const locale = useLocale();
-  const router = useRouter();
-  const pathname = usePathname();
 
   const switchLocale = (newLocale: string) => {
-    // With localePrefix: "as-needed":
-    //   "vi" (default) → no prefix in URL  e.g. /  or /app/chat
-    //   "en"           → /en prefix        e.g. /en or /en/app/chat
-    //
-    // Strategy: strip any known locale prefix, then re-add the target prefix.
-    const stripped = pathname.replace(/^\/(vi|en)(?=\/|$)/, "") || "/";
-
-    if (newLocale === "vi") {
-      // Default locale — no prefix needed
-      router.push(stripped);
-    } else {
-      // Non-default — add /en prefix
-      router.push(`/${newLocale}${stripped === "/" ? "" : stripped}`);
-    }
+    if (newLocale === locale) return;
+    // Set NEXT_LOCALE cookie and reload so the server picks it up.
+    // localePrefix: "never" means the URL never changes — only the cookie.
+    document.cookie = `NEXT_LOCALE=${newLocale}; path=/; max-age=31536000; SameSite=Lax`;
+    window.location.reload();
   };
 
   return (
