@@ -50,7 +50,7 @@ export default async function LandingPage() {
           </div>
 
           {/* Headline */}
-          <h1 className="text-4xl md:text-5xl lg:text-6xl leading-tight tracking-tight font-bold">
+          <h1 className="text-4xl md:text-5xl lg:text-6xl leading-tight tracking-tight font-bold" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
             <span className="text-[#FF6B4A]">{t("landing.heroTitle1")}</span>
             <br />
             <span className="text-[#1A1A2E]">{t("landing.heroTitle2")}</span>
