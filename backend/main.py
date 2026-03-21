@@ -493,20 +493,12 @@ async def export_pdf(
     ai_report = ""
     try:
         from backend.llm.client import call_llm_with_retry, LLMFailureError
+        from backend.llm.prompts import SYSTEM_PROMPT_REPORT
 
         llm_result = await call_llm_with_retry(
             model="gpt-5.4-mini",
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a professional data analyst. Analyze the following work session "
-                        "history from SOTA StatWorks and produce a concise, well-structured report "
-                        "in English. Organize by: Executive Summary, Chat Analysis, Data Changes, "
-                        "Dashboard Insights, and Recommendations. Be thorough but concise.\n\n"
-                        "Return JSON: {\"report\": \"<your full markdown report>\"}"
-                    ),
-                },
+                {"role": "system", "content": SYSTEM_PROMPT_REPORT},
                 {"role": "user", "content": json.dumps(entry_summaries, ensure_ascii=False, default=str)},
             ],
             response_format={"type": "json_object"},

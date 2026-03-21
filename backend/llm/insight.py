@@ -14,8 +14,10 @@ import logging
 from pydantic import BaseModel
 
 from backend.llm.client import LLMFailureError, call_llm_with_retry
+from backend.llm.prompts import SYSTEM_PROMPT_INSIGHT
 
 logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Response model
@@ -27,29 +29,6 @@ class InsightText(BaseModel):
 
     summary: str
     recommendation: str
-
-
-# ---------------------------------------------------------------------------
-# System prompt — business language, no jargon
-# ---------------------------------------------------------------------------
-
-SYSTEM_PROMPT_INSIGHT: str = (
-    "You are a business insights advisor. Given statistical analysis results, "
-    "write a concise summary and one actionable recommendation in plain "
-    "business language.\n\n"
-    "CRITICAL RULES:\n"
-    "- Do NOT use these words: coefficient, p-value, regression, PLS, OLS, "
-    "bootstrap, latent variable, SEM, beta, R-squared.\n"
-    "- Write as if advising a CEO who has never taken a statistics class.\n"
-    "- The summary should be 1-2 sentences explaining the key finding.\n"
-    "- The recommendation should be 1-2 sentences of actionable advice.\n"
-    "- The drivers are listed in order from STRONGEST to WEAKEST impact. "
-    "Your summary MUST reflect this same ranking order — mention the #1 "
-    "driver first, then secondary drivers.\n\n"
-    "Return ONLY valid JSON matching this schema:\n"
-    '{"summary": "string", "recommendation": "string"}\n'
-    "Do not include markdown, code fences, or explanation."
-)
 
 
 # ---------------------------------------------------------------------------
