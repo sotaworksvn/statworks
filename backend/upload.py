@@ -243,12 +243,15 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
     df.columns = df.columns.str.strip()
 
     # 3b. Normalize date column "Ngày" → DD/MM/YYYY
+    # Two-pass strategy: explicit formats only, no auto-inference.
+    # Pass 1: dayfirst=True handles DD/MM/YYYY strings.
+    # Pass 2: ISO8601 handles "2026-03-02T00:00:00" timestamps.
     if "Ngày" in df.columns:
         original = df["Ngày"].copy()
-        converted = pd.to_datetime(df["Ngày"], dayfirst=True, format="mixed", errors="coerce")
-        formatted = converted.dt.strftime("%d/%m/%Y")
-        # Keep original value where parsing failed (NaT → strftime gives NaN)
-        df["Ngày"] = formatted.where(converted.notna(), original)
+        parsed_1 = pd.to_datetime(df["Ngày"], dayfirst=True, errors="coerce")
+        parsed_2 = pd.to_datetime(df["Ngày"], format="ISO8601", errors="coerce")
+        converted = parsed_1.fillna(parsed_2)
+        df["Ngày"] = converted.dt.strftime("%d/%m/%Y").where(converted.notna(), original)
 
     # 4. Parse context files
     context_parts: list[str] = []

@@ -698,7 +698,9 @@ async def _handle_data_edit(
 
         for col in date_cols_from_edits:
             original = df[col].copy()
-            converted = pd.to_datetime(df[col], dayfirst=dayfirst, format="mixed", errors="coerce")
+            parsed_1 = pd.to_datetime(df[col], dayfirst=dayfirst, errors="coerce")
+            parsed_2 = pd.to_datetime(df[col], format="ISO8601", errors="coerce")
+            converted = parsed_1.fillna(parsed_2)
             formatted = converted.dt.strftime(strftime_fmt)
 
             if row_range is not None:
