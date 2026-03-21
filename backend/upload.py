@@ -46,7 +46,18 @@ def _parse_excel(content: bytes, ext: str = ".xlsx") -> pd.DataFrame:
     """Parse an .xlsx or .xls file into a DataFrame."""
     import io
     engine = "xlrd" if ext == ".xls" else "openpyxl"
-    return pd.read_excel(io.BytesIO(content), engine=engine)
+    try:
+        return pd.read_excel(io.BytesIO(content), engine=engine)
+    except ImportError as exc:
+        if ext == ".xls":
+            raise HTTPException(
+                status_code=500,
+                detail="Thiếu dependency 'xlrd' để đọc file .xls. Chạy: pip install xlrd>=2.0.1 hoặc chuyển file sang .xlsx.",
+            ) from exc
+        raise HTTPException(
+            status_code=500,
+            detail="Thiếu dependency parser cho Excel. Kiểm tra cài đặt backend dependencies.",
+        ) from exc
 
 
 def _parse_csv(content: bytes) -> pd.DataFrame:
@@ -236,7 +247,22 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
     # 3. Parse the first primary file as the main dataset
     primary_fn, primary_ext, primary_content = primary_files[0]
     if primary_ext in (".xlsx", ".xls"):
-        df = _parse_excel(primary_content, primary_ext)
+        try:
+            df = _parse_excel(primary_content, primary_ext)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            # Common client-side issue: real .xlsx content saved with ".xls" name.
+            if primary_ext == ".xls" and primary_content[:4] == b"PK\x03\x04":
+                df = _parse_excel(primary_content, ".xlsx")
+            else:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"File '{primary_fn}' không đúng định dạng Excel hợp lệ hoặc đã hỏng. "
+                        "Hãy mở file và lưu lại thành .xlsx rồi upload lại."
+                    ),
+                ) from exc
     else:
         df = _parse_csv(primary_content)
 
@@ -297,7 +323,11 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
 
     # 8. Async persistence — fire-and-forget (non-blocking)
     if r2_key and r2.is_available():
-        content_type = "text/csv" if primary_ext == ".csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        content_type = {
+            ".csv": "text/csv",
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".xls": "application/vnd.ms-excel",
+        }.get(primary_ext, "application/octet-stream")
         asyncio.create_task(_persist_to_r2(r2_key, primary_content, content_type))
 
     if clerk_user_id and r2_key and supa.is_available():

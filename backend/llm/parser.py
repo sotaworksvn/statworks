@@ -27,6 +27,107 @@ _DEFAULT_PARSED: dict[str, Any] = {
     "edits": [],
 }
 
+_SUPPORTED_INTENTS: set[str] = {
+    "driver_analysis",
+    "comparison",
+    "summary",
+    "general_question",
+    "data_edit",
+    "not_supported",
+    "scholarship_prediction",
+    "scholarship",
+    "predict_scholarship",
+    "school_matching",
+    "descriptive",
+    "descriptive_statistics",
+    "frequency",
+    "frequencies",
+    "correlation",
+    "correlations",
+    "scatter",
+    "scatter_plot",
+    "reliability",
+    "validity",
+    "model_fit",
+    "effects",
+    "effects_table",
+    "path_coefficients",
+    "bootstrap",
+    "pls_sem",
+    "bar_chart",
+}
+
+
+def _looks_off_topic(query: str) -> bool:
+    q = query.lower()
+    off_topic_cues = (
+        "capital of",
+        "weather",
+        "recipe",
+        "poem",
+        "joke",
+        "translate",
+        "code review",
+        "python bug",
+        "movie",
+        "football",
+        "stock price",
+    )
+    return any(cue in q for cue in off_topic_cues)
+
+
+def _looks_data_related(query: str) -> bool:
+    q = query.lower()
+    data_cues = (
+        "data",
+        "dataset",
+        "column",
+        "row",
+        "table",
+        "analy",
+        "insight",
+        "summary",
+        "trend",
+        "compare",
+        "impact",
+        "affect",
+        "driver",
+        "score",
+        "rate",
+        "group",
+        "mean",
+        "average",
+        "correlation",
+        "regression",
+        "thong ke",
+        "du lieu",
+        "dữ liệu",
+        "phan tich",
+        "phân tích",
+        "tong quan",
+        "tổng quan",
+        "so sanh",
+        "so sánh",
+        "anh huong",
+        "ảnh hưởng",
+        "yeu to",
+        "yếu tố",
+    )
+    return any(cue in q for cue in data_cues)
+
+
+def _intent_hint_from_query(query: str) -> str:
+    q = query.lower()
+    if any(k in q for k in ("compare", "comparison", "so sanh", "so sánh", "khac nhau", "khác nhau")):
+        return "comparison"
+    if any(k in q for k in ("summary", "summarize", "tong quan", "tổng quan", "overview")):
+        return "summary"
+    if any(k in q for k in ("change", "edit", "update", "sua", "chinh sua", "sửa", "chỉnh sửa")):
+        return "data_edit"
+    if any(k in q for k in ("impact", "affect", "influence", "driver", "anh huong", "ảnh hưởng", "tac dong", "tác động", "yeu to", "yếu tố")):
+        return "driver_analysis"
+    return "general_question"
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -97,7 +198,7 @@ async def parse_user_intent(
             return dict(_DEFAULT_PARSED)
 
         # Normalise: ensure keys exist with safe defaults
-        return {
+        parsed = {
             "intent": result.get("intent", "driver_analysis"),
             "target": result.get("target"),
             "features": result.get("features", []) or [],
@@ -105,6 +206,19 @@ async def parse_user_intent(
             "not_supported_reason": result.get("not_supported_reason"),
             "edits": result.get("edits", []) or [],
         }
+
+        intent = str(parsed.get("intent") or "").lower().replace(" ", "_")
+        if intent not in _SUPPORTED_INTENTS:
+            parsed["intent"] = "general_question"
+            parsed["not_supported_reason"] = None
+            return parsed
+
+        # Make parser less rigid: keep not_supported only for clearly off-topic requests.
+        if intent == "not_supported" and not _looks_off_topic(query):
+            parsed["intent"] = _intent_hint_from_query(query) if _looks_data_related(query) else "general_question"
+            parsed["not_supported_reason"] = None
+
+        return parsed
 
     except LLMFailureError as exc:
         logger.warning("LLM Call 1 failed, using fallback: %s", exc)

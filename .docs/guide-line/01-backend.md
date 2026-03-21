@@ -13,10 +13,10 @@
 
 ```bash
 # Install (from project root)
-cd backend && pip install -e .
+pip install -e backend
 
 # Run dev server (from project root)
-python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 
 # Run tests (from project root)
 python -m pytest backend/tests/ -v

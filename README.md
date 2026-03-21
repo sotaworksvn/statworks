@@ -144,10 +144,10 @@ cd sota-statworks-pro
 ### 2. Backend setup
 
 ```bash
-cd backend
-cp .env.example .env    # Edit with your API keys
-pip install -e .
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+# Run from project root
+cp backend/.env.example backend/.env    # Edit with your API keys
+pip install -e backend
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### 3. Frontend setup

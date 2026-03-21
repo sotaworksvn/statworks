@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
+import unicodedata
 
 from fastapi import APIRouter, HTTPException
 
@@ -94,6 +96,14 @@ async def analyze(body: AnalyzeRequest) -> AnalyzeResponse:
                 elapsed = time.perf_counter() - t_start
                 logger.info("/analyze direct dispatch '%s' in %.3fs", method_key, elapsed)
                 return _dispatch_direct(method_key, df, target)
+
+        # ---------------------------------------------------------------
+        # Step 2a.1: GPA target planning (deterministic, no regression)
+        # ---------------------------------------------------------------
+        if _is_gpa_goal_query(body.query):
+            elapsed = time.perf_counter() - t_start
+            logger.info("/analyze GPA goal dispatch in %.3fs", elapsed)
+            return _handle_gpa_goal(df, body.query)
 
         # ---------------------------------------------------------------
         # Step 2b: LLM Call 1 — intent parsing (gpt-5.4-mini)
@@ -298,10 +308,268 @@ async def analyze(body: AnalyzeRequest) -> AnalyzeResponse:
         raise
     except Exception as exc:
         logger.exception("Unexpected error in /analyze")
-        raise HTTPException(
-            status_code=500,
-            detail="Unexpected error. Please try again.",
-        ) from exc
+        return AnalyzeResponse(
+            summary="Hệ thống gặp lỗi nội bộ khi xử lý yêu cầu.",
+            drivers=[],
+            r2=None,
+            recommendation="Vui lòng thử lại. Nếu lỗi lặp lại, hãy hỏi theo mẫu: 'Mục tiêu GPA 8.0, mỗi môn chưa có điểm cần bao nhiêu?'",
+            model_type=None,
+            decision_trace=DecisionTrace(
+                score_pls=0.0,
+                score_reg=0.0,
+                engine_selected=None,
+                reason="Unexpected error fallback",
+            ),
+            result_type="general",
+        )
+
+
+def _is_gpa_goal_query(query: str) -> bool:
+    q = _normalize_text(query)
+    has_goal = any(k in q for k in ("gpa", "diem trung binh", "grade point average"))
+    has_requirement = any(
+        k in q
+        for k in (
+            "bao nhieu",
+            "it nhat",
+            "at least",
+            "can",
+            "need",
+            "required",
+        )
+    )
+    has_pending = any(
+        k in q
+        for k in (
+            "chua co diem",
+            "pending",
+            "not started",
+            "studying",
+            "moi mon",
+            "each subject",
+        )
+    )
+    return has_goal and (has_requirement or has_pending)
+
+
+def _extract_gpa_target(query: str) -> float | None:
+    q = _normalize_text(query)
+    # Prefer values near cues like "gpa", "lên/to", "target"
+    patterns = [
+        r"(?:gpa|target|muc tieu|len|to)\D{0,8}(\d{1,2}(?:[.,]\d{1,2})?)",
+        r"(\d{1,2}(?:[.,]\d{1,2})?)\D{0,8}(?:gpa)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, q, flags=re.IGNORECASE)
+        if m:
+            try:
+                return float(m.group(1).replace(",", "."))
+            except ValueError:
+                pass
+    return None
+
+
+def _normalize_text(text: str | None) -> str:
+    if not text:
+        return ""
+    s = unicodedata.normalize("NFD", text)
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+    return s.lower()
+
+
+def _find_first_column(columns: list[str], candidates: list[str]) -> str | None:
+    by_lower = {c.lower(): c for c in columns}
+    for cand in candidates:
+        if cand in by_lower:
+            return by_lower[cand]
+    for col in columns:
+        low = col.lower()
+        if any(cand in low for cand in candidates):
+            return col
+    return None
+
+
+def _handle_gpa_goal(df: "pd.DataFrame", query: str) -> AnalyzeResponse:
+    """Estimate required grade per pending subject to hit a GPA target."""
+    import pandas as pd
+
+    _no_trace = DecisionTrace(
+        score_pls=0.0, score_reg=0.0, engine_selected=None, reason="Intent: gpa_goal_planning",
+    )
+
+    columns = df.columns.tolist()
+    grade_col = _find_first_column(
+        columns,
+        ["grade", "điểm", "diem", "score", "mark"],
+    )
+    credit_col = _find_first_column(
+        columns,
+        ["credit", "tín chỉ", "tin chi", "units", "ects"],
+    )
+    status_col = _find_first_column(
+        columns,
+        ["status", "trạng thái", "trang thai"],
+    )
+    subject_col = _find_first_column(
+        columns,
+        ["subject name", "course", "môn", "mon", "subject"],
+    )
+
+    if not grade_col or not credit_col:
+        return AnalyzeResponse(
+            summary="Không tìm thấy đủ cột để tính GPA mục tiêu (cần cột điểm và tín chỉ).",
+            drivers=[], r2=None,
+            recommendation="Hãy đảm bảo file có cột tương đương 'Grade' và 'Credit'.",
+            model_type=None, decision_trace=_no_trace,
+            result_type="general",
+        )
+
+    grades = pd.to_numeric(df[grade_col], errors="coerce")
+    credits = pd.to_numeric(df[credit_col], errors="coerce")
+
+    known_mask = grades.notna() & credits.notna() & (credits > 0)
+    if int(known_mask.sum()) == 0:
+        return AnalyzeResponse(
+            summary="Chưa có đủ môn đã có điểm + tín chỉ để tính GPA hiện tại.",
+            drivers=[], r2=None,
+            recommendation="Cần ít nhất một môn có đủ Grade và Credit > 0.",
+            model_type=None, decision_trace=_no_trace,
+            result_type="general",
+        )
+
+    known_points = float((grades[known_mask] * credits[known_mask]).sum())
+    known_credits = float(credits[known_mask].sum())
+    current_gpa = known_points / known_credits if known_credits > 0 else 0.0
+
+    target = _extract_gpa_target(query)
+    if target is None:
+        target = min(current_gpa + 0.5, 10.0)
+
+    # Detect grade scale from existing data
+    grade_scale_max = 10.0
+    max_seen = float(grades[known_mask].max()) if int(known_mask.sum()) else 10.0
+    if max_seen <= 4.5 and target <= 4.5:
+        grade_scale_max = 4.0
+
+    if target > grade_scale_max:
+        return AnalyzeResponse(
+            summary=f"Mục tiêu GPA {target:.2f} vượt thang điểm hiện tại (0-{grade_scale_max:.1f}).",
+            drivers=[], r2=None,
+            recommendation=f"Hãy nhập mục tiêu trong khoảng 0-{grade_scale_max:.1f}.",
+            model_type=None, decision_trace=_no_trace,
+            result_type="general",
+        )
+
+    pending_mask = grades.isna()
+    if status_col:
+        status_txt = df[status_col].astype(str).str.lower()
+        done_status = status_txt.str.contains(
+            r"passed|completed|done|đạt|dat",
+            na=False,
+            regex=True,
+        )
+        pending_status = status_txt.str.contains(
+            r"studying|not started|in progress|register|pending|chưa|dang hoc",
+            na=False,
+            regex=True,
+        )
+        pending_mask = (pending_mask & ~done_status) | pending_status
+
+    if subject_col:
+        pending_mask = pending_mask & df[subject_col].notna()
+
+    pending_df = df[pending_mask].copy()
+    pending_count = len(pending_df)
+    if pending_count == 0:
+        if current_gpa >= target:
+            summary = f"GPA hiện tại khoảng {current_gpa:.2f}, đã đạt mục tiêu {target:.2f}."
+            rec = "Bạn không cần thêm điểm để đạt mục tiêu này."
+        else:
+            summary = f"Không còn môn chờ điểm nhưng GPA hiện tại ({current_gpa:.2f}) chưa đạt mục tiêu {target:.2f}."
+            rec = "Bạn cần học cải thiện hoặc đăng ký thêm môn có điểm cao."
+        return AnalyzeResponse(
+            summary=summary,
+            drivers=[], r2=None,
+            recommendation=rec,
+            model_type=None, decision_trace=_no_trace,
+            result_type="general",
+        )
+
+    pending_credits = pd.to_numeric(pending_df[credit_col], errors="coerce")
+    known_pending_credits = float(pending_credits.fillna(0).clip(lower=0).sum())
+    missing_credit_count = int((pending_credits.isna() | (pending_credits <= 0)).sum())
+
+    def _required_avg(extra_credits: float) -> float:
+        return ((target * (known_credits + extra_credits)) - known_points) / extra_credits
+
+    # Case A: exact computation (all pending credits known)
+    if known_pending_credits > 0 and missing_credit_count == 0:
+        req = _required_avg(known_pending_credits)
+
+        if req <= 0:
+            summary = (
+                f"GPA hiện tại {current_gpa:.2f}. Với {pending_count} môn chưa có điểm "
+                f"(tổng {known_pending_credits:.1f} tín chỉ), bạn đã ở mức đạt mục tiêu {target:.2f}."
+            )
+            recommendation = "Giữ điểm các môn còn lại ổn định để duy trì GPA mục tiêu."
+        elif req > grade_scale_max:
+            summary = (
+                f"Để đạt GPA {target:.2f}, điểm trung bình cần cho các môn còn lại là {req:.2f}/{grade_scale_max:.1f}, "
+                "vượt thang điểm nên không khả thi theo dữ liệu hiện tại."
+            )
+            recommendation = "Giảm mục tiêu GPA hoặc tăng số tín chỉ môn mới có thể đạt điểm cao."
+        else:
+            summary = (
+                f"GPA hiện tại {current_gpa:.2f}. Để lên {target:.2f}, "
+                f"mỗi môn chưa có điểm cần trung bình tối thiểu khoảng {req:.2f}/{grade_scale_max:.1f}."
+            )
+            recommendation = (
+                f"Tập trung giữ các môn pending từ {req:.2f} trở lên, ưu tiên môn nhiều tín chỉ trước."
+            )
+
+        return AnalyzeResponse(
+            summary=summary,
+            drivers=[], r2=None,
+            recommendation=recommendation,
+            model_type=None, decision_trace=_no_trace,
+            result_type="general",
+        )
+
+    # Case B: estimate when some pending credits are missing
+    known_credit_values = pd.to_numeric(df[credit_col], errors="coerce")
+    known_credit_values = known_credit_values[(known_credit_values > 0) & known_credit_values.notna()]
+    avg_credit = float(known_credit_values.median()) if len(known_credit_values) else 3.0
+    if avg_credit <= 0:
+        avg_credit = 3.0
+
+    estimated_pending_credits = known_pending_credits + (missing_credit_count * avg_credit)
+    req_est = _required_avg(estimated_pending_credits) if estimated_pending_credits > 0 else float("inf")
+
+    scenario_lines = []
+    for credit_assumption in (2.0, 3.0, 4.0):
+        est_credits = known_pending_credits + (missing_credit_count * credit_assumption)
+        if est_credits <= 0:
+            continue
+        req_s = _required_avg(est_credits)
+        scenario_lines.append(f"~{credit_assumption:.0f} tín chỉ/môn => cần khoảng {req_s:.2f}")
+
+    summary = (
+        f"GPA hiện tại {current_gpa:.2f}. Có {pending_count} môn chưa có điểm nhưng thiếu dữ liệu tín chỉ "
+        f"ở {missing_credit_count} môn nên chưa thể tính chính xác. "
+        f"Ước tính nếu mỗi môn pending ~{avg_credit:.1f} tín chỉ thì cần trung bình khoảng {req_est:.2f}/{grade_scale_max:.1f}."
+    )
+    recommendation = (
+        "Bổ sung Credit cho các môn chưa có điểm để hệ thống tính chính xác. "
+        + (" | ".join(scenario_lines) if scenario_lines else "")
+    )
+
+    return AnalyzeResponse(
+        summary=summary,
+        drivers=[], r2=None,
+        recommendation=recommendation,
+        model_type=None, decision_trace=_no_trace,
+        result_type="general",
+    )
 
 
 async def _persist_analysis_result(file_id: str, result_dict: dict) -> None:

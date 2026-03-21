@@ -156,6 +156,8 @@ async def get_or_restore_entry(file_id: str) -> FileEntry | None:
         content_bytes = stream.read()
         if ext == ".csv":
             df = pd.read_csv(io.BytesIO(content_bytes))
+        elif ext == ".xls":
+            df = pd.read_excel(io.BytesIO(content_bytes), engine="xlrd")
         else:
             df = pd.read_excel(io.BytesIO(content_bytes), engine="openpyxl")
 
