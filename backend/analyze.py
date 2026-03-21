@@ -369,6 +369,33 @@ def _extract_gpa_target(query: str) -> float | None:
     return None
 
 
+def _gpa_query_prefers_each_subject(query: str) -> bool:
+    q = _normalize_text(query)
+    return any(
+        k in q
+        for k in (
+            "moi mon",
+            "tung mon",
+            "tung hoc phan",
+            "each subject",
+            "every subject",
+            "per subject",
+        )
+    )
+
+
+def _gpa_query_prefers_average(query: str) -> bool:
+    q = _normalize_text(query)
+    return any(
+        k in q
+        for k in (
+            "trung binh",
+            "average",
+            "avg",
+        )
+    )
+
+
 def _normalize_text(text: str | None) -> str:
     if not text:
         return ""
@@ -396,6 +423,8 @@ def _handle_gpa_goal(df: "pd.DataFrame", query: str) -> AnalyzeResponse:
     _no_trace = DecisionTrace(
         score_pls=0.0, score_reg=0.0, engine_selected=None, reason="Intent: gpa_goal_planning",
     )
+    prefers_each_subject = _gpa_query_prefers_each_subject(query)
+    prefers_average = _gpa_query_prefers_average(query)
 
     columns = df.columns.tolist()
     grade_col = _find_first_column(
@@ -519,9 +548,14 @@ def _handle_gpa_goal(df: "pd.DataFrame", query: str) -> AnalyzeResponse:
             )
             recommendation = "Giảm mục tiêu GPA hoặc tăng số tín chỉ môn mới có thể đạt điểm cao."
         else:
+            req_phrase = (
+                f"mỗi môn chưa có điểm cần tối thiểu khoảng {req:.2f}/{grade_scale_max:.1f}"
+                if prefers_each_subject and not prefers_average
+                else f"điểm trung bình các môn còn lại cần khoảng {req:.2f}/{grade_scale_max:.1f}"
+            )
             summary = (
                 f"GPA hiện tại {current_gpa:.2f}. Để lên {target:.2f}, "
-                f"mỗi môn chưa có điểm cần trung bình tối thiểu khoảng {req:.2f}/{grade_scale_max:.1f}."
+                f"{req_phrase}."
             )
             recommendation = (
                 f"Tập trung giữ các môn pending từ {req:.2f} trở lên, ưu tiên môn nhiều tín chỉ trước."
@@ -545,18 +579,47 @@ def _handle_gpa_goal(df: "pd.DataFrame", query: str) -> AnalyzeResponse:
     estimated_pending_credits = known_pending_credits + (missing_credit_count * avg_credit)
     req_est = _required_avg(estimated_pending_credits) if estimated_pending_credits > 0 else float("inf")
 
+    if req_est <= 0:
+        summary = (
+            f"GPA hiện tại {current_gpa:.2f}. Với dữ liệu hiện có, bạn đã đạt hoặc vượt mục tiêu {target:.2f} "
+            "nên không cần mức điểm tối thiểu dương cho các môn còn lại."
+        )
+        recommendation = (
+            "Bạn chỉ cần giữ điểm các môn còn lại ở mức ổn định để duy trì GPA mục tiêu. "
+            "Nếu muốn hệ thống dự báo chính xác hơn, hãy bổ sung Credit cho các môn chưa có điểm."
+        )
+        return AnalyzeResponse(
+            summary=summary,
+            drivers=[], r2=None,
+            recommendation=recommendation,
+            model_type=None, decision_trace=_no_trace,
+            result_type="general",
+        )
+
     scenario_lines = []
     for credit_assumption in (2.0, 3.0, 4.0):
         est_credits = known_pending_credits + (missing_credit_count * credit_assumption)
         if est_credits <= 0:
             continue
         req_s = _required_avg(est_credits)
-        scenario_lines.append(f"~{credit_assumption:.0f} tín chỉ/môn => cần khoảng {req_s:.2f}")
+        if req_s <= 0:
+            scenario_lines.append(f"~{credit_assumption:.0f} tín chỉ/môn => đã đạt mục tiêu")
+        elif req_s > grade_scale_max:
+            scenario_lines.append(
+                f"~{credit_assumption:.0f} tín chỉ/môn => cần {req_s:.2f}/{grade_scale_max:.1f} (khó khả thi)"
+            )
+        else:
+            scenario_lines.append(f"~{credit_assumption:.0f} tín chỉ/môn => cần khoảng {req_s:.2f}")
 
+    req_est_phrase = (
+        f"mỗi môn cần tối thiểu khoảng {req_est:.2f}/{grade_scale_max:.1f}"
+        if prefers_each_subject and not prefers_average
+        else f"điểm trung bình cần khoảng {req_est:.2f}/{grade_scale_max:.1f}"
+    )
     summary = (
         f"GPA hiện tại {current_gpa:.2f}. Có {pending_count} môn chưa có điểm nhưng thiếu dữ liệu tín chỉ "
         f"ở {missing_credit_count} môn nên chưa thể tính chính xác. "
-        f"Ước tính nếu mỗi môn pending ~{avg_credit:.1f} tín chỉ thì cần trung bình khoảng {req_est:.2f}/{grade_scale_max:.1f}."
+        f"Ước tính nếu mỗi môn pending ~{avg_credit:.1f} tín chỉ thì {req_est_phrase}."
     )
     recommendation = (
         "Bổ sung Credit cho các môn chưa có điểm để hệ thống tính chính xác. "
