@@ -53,12 +53,43 @@ class AnalyzeResponse(BaseModel):
     drivers: list[DriverResult]
     r2: float | None
     recommendation: str
-    model_type: Literal["regression", "pls"] | None
+    model_type: Literal["regression", "pls", "scholarship_pls"] | None
     decision_trace: DecisionTrace
-    result_type: str = "regression"  # regression|descriptive|frequency|correlation|scatter|reliability|validity|model_fit|effects|not_supported
-    table_data: dict | None = None   # flexible payload for non-regression results
-    not_supported: bool = False       # True when the query can't be answered with available data
-    suggestion: str | None = None     # Helpful suggestion when not_supported=True
+    result_type: str = "regression"  # regression|scholarship_prediction|descriptive|...
+    table_data: dict | None = None
+    not_supported: bool = False
+    suggestion: str | None = None
+    # Scholarship-specific fields
+    school_matches: list["SchoolMatch"] | None = None
+    student_profile: dict | None = None
+
+
+# ---------------------------------------------------------------------------
+# Scholarship (EdTech Track)
+# ---------------------------------------------------------------------------
+
+class SchoolMatch(BaseModel):
+    school_name: str
+    country: str
+    match_score: int  # 0-100
+    match_level: Literal["dream", "target", "safety"]
+    strengths: list[str]
+    weaknesses: list[str]
+
+
+class ScholarshipSimulateRequest(BaseModel):
+    file_id: str
+    school_name: str
+    improvements: dict  # e.g. {"sat_score": 1500, "ielts_score": 7.5}
+
+
+class ScholarshipSimulateResponse(BaseModel):
+    type: str
+    school_name: str
+    current_score: int
+    new_score: int
+    delta: int
+    level_change: str | None
 
 # ---------------------------------------------------------------------------
 # Simulate (F-03)
@@ -125,12 +156,6 @@ class DatasetContentResponse(BaseModel):
     row_count: int
     context_text: str | None = None
 
-
-class DatasetContentUpdateRequest(BaseModel):
-    """Request for PUT /datasets/{id}/content — updates cell values."""
-    row_index: int
-    column_name: str
-    new_value: str | float | int | bool | None
 
 
 # ---------------------------------------------------------------------------

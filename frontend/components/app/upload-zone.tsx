@@ -127,10 +127,13 @@ export function UploadZone() {
 
         <div>
           <p className="font-semibold text-[#2D3561] text-lg mb-1">
-            {isDragActive ? "Drop your file here" : "Drag & drop your dataset"}
+            {isDragActive ? "Thả file vào đây" : "Kéo thả hồ sơ vào đây"}
           </p>
           <p className="text-gray-400 text-sm">
-            or click to browse · .xlsx, .csv, .docx, .pptx · Max 20 MB
+            hoặc click để chọn · .xlsx, .csv, .docx, .pptx · Tối đa 20 MB · 15 file
+          </p>
+          <p className="text-gray-300 text-xs mt-2">
+            Bảng điểm · CV · Chứng chỉ IELTS/SAT · Thư giới thiệu
           </p>
         </div>
       </div>

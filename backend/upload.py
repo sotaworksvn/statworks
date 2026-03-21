@@ -27,7 +27,9 @@ router = APIRouter()
 # Constants
 # ---------------------------------------------------------------------------
 ALLOWED_PRIMARY = {".xlsx", ".csv"}
-ALLOWED_CONTEXT = {".docx", ".pptx"}
+ALLOWED_CONTEXT = {".docx", ".pptx", ".pdf"}
+MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+MAX_FILES_PER_UPLOAD = 15  # EdTech: up to 15 files (transcripts, CV, certs)
 ALLOWED_ALL = ALLOWED_PRIMARY | ALLOWED_CONTEXT
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 MAX_FILES_PER_UPLOAD = 5

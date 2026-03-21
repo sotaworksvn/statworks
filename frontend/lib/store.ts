@@ -28,10 +28,13 @@ interface AppState {
   analyzeError: string | null;
   chatMessages: { role: "user" | "assistant"; content: string }[];
 
-  // Simulation
+  // Scholarship simulation
   simulation: SimulationResult | null;
   isSimulating: boolean;
   simulateError: string | null;
+
+  // Student profile extracted from files
+  studentProfile: Record<string, unknown> | null;
 }
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
@@ -65,6 +68,7 @@ interface AppActions {
   setSimulation: (sim: SimulationResult | null) => void;
   setIsSimulating: (v: boolean) => void;
   setSimulateError: (err: string | null) => void;
+  setStudentProfile: (profile: Record<string, unknown> | null) => void;
 
   /** Reset dataset and all derived state (insight, simulation) */
   resetDataset: () => void;
@@ -92,6 +96,7 @@ const INITIAL_STATE: AppState = {
   simulation: null,
   isSimulating: false,
   simulateError: null,
+  studentProfile: null,
 };
 
 // ─── Zustand Store ────────────────────────────────────────────────────────────
@@ -161,6 +166,7 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
   setSimulation: (simulation) => set({ simulation }),
   setIsSimulating: (isSimulating) => set({ isSimulating }),
   setSimulateError: (simulateError) => set({ simulateError }),
+  setStudentProfile: (studentProfile) => set({ studentProfile }),
 
   resetDataset: () =>
     set({

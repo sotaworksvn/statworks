@@ -1,6 +1,6 @@
 """In-memory history store with JSON file persistence.
 
-Three categories: chat, data, dashboard.
+Two categories: chat, data.
 Entries are keyed by (user_id, category) and sorted newest-first.
 Persists to a JSON file so history survives server restarts.
 """
@@ -120,7 +120,7 @@ def list_entries(
     """List history entries, optionally filtered by category and date range."""
     results: list[HistoryEntry] = []
 
-    categories = [category] if category else ["chat", "data", "dashboard"]
+    categories = [category] if category else ["chat", "data"]
     for cat in categories:
         results.extend(_store[user_id].get(cat, []))
 

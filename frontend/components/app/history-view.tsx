@@ -18,7 +18,7 @@ function useSafeUser() {
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 
-type HistoryTab = "chat" | "data" | "dashboard";
+type HistoryTab = "chat" | "data";
 
 interface HistoryEntry {
   id: string;
@@ -28,12 +28,11 @@ interface HistoryEntry {
   snapshot_preview: string;
 }
 
-/* ─── Tab Config ─────────────────────────────────────────────────────────── */
+/* ─── Tab Config — Monitor removed ──────────────────────────────────────── */
 
 const TABS: { key: HistoryTab; icon: string; label: string; urlSlug: string }[] = [
-  { key: "chat", icon: "💬", label: "AI Chat", urlSlug: "chat" },
-  { key: "data", icon: "📊", label: "Data Edits", urlSlug: "viewer" },
-  { key: "dashboard", icon: "🎯", label: "Monitor", urlSlug: "monitor" },
+  { key: "chat", icon: "💬", label: "Phân tích", urlSlug: "chat" },
+  { key: "data", icon: "📊", label: "Xem dữ liệu", urlSlug: "viewer" },
 ];
 
 /* ─── Component ──────────────────────────────────────────────────────────── */
@@ -45,11 +44,9 @@ export function HistoryView() {
   const params = useParams();
   const slug = params.slug as string[] | undefined;
 
-  // Read initial tab from URL slug: /app/history/chat | /app/history/viewer | /app/history/monitor
   const getInitialTab = (): HistoryTab => {
     const sub = slug?.[1];
     if (sub === "viewer") return "data";
-    if (sub === "monitor") return "dashboard";
     return "chat";
   };
 
@@ -67,16 +64,15 @@ export function HistoryView() {
     const fetchId = ++fetchRef.current;
     setIsLoading(true);
 
-    const params = new URLSearchParams({ category: tab });
-    if (fromDate) params.set("from_dt", new Date(fromDate).toISOString());
+    const qp = new URLSearchParams({ category: tab });
+    if (fromDate) qp.set("from_dt", new Date(fromDate).toISOString());
     if (toDate) {
-      // If datetime-local (has T), use as-is; if date-only, add end of day
       const toStr = toDate.includes("T") ? toDate : toDate + "T23:59:59";
-      params.set("to_dt", new Date(toStr).toISOString());
+      qp.set("to_dt", new Date(toStr).toISOString());
     }
 
     try {
-      const res = await fetch(`${backendUrl}/api/history?${params}`, {
+      const res = await fetch(`${backendUrl}/api/history?${qp}`, {
         headers: user?.id ? { "x-clerk-user-id": user.id } : {},
       });
       if (fetchId !== fetchRef.current) return;
@@ -97,24 +93,21 @@ export function HistoryView() {
     if (minutes === null) { setFromDate(""); setToDate(""); return; }
     const to = new Date();
     const from = new Date(to.getTime() - minutes * 60 * 1000);
-    // Use ISO datetime strings for sub-day precision
     setFromDate(from.toISOString().slice(0, 16));
     setToDate(to.toISOString().slice(0, 16));
   };
 
   const handleExport = async () => {
     setIsExporting(true);
-
     try {
-      // Build GET URL with query params
-      const params = new URLSearchParams();
-      if (fromDate) params.set("from_dt", new Date(fromDate).toISOString());
+      const qp = new URLSearchParams();
+      if (fromDate) qp.set("from_dt", new Date(fromDate).toISOString());
       if (toDate) {
         const toStr = toDate.includes("T") ? toDate : toDate + "T23:59:59";
-        params.set("to_dt", new Date(toStr).toISOString());
+        qp.set("to_dt", new Date(toStr).toISOString());
       }
-      if (user?.id) params.set("_clerk_user_id", user.id);
-      const qs = params.toString();
+      if (user?.id) qp.set("_clerk_user_id", user.id);
+      const qs = qp.toString();
 
       const url = `${backendUrl}/api/history/export-pdf${qs ? "?" + qs : ""}`;
       const response = await fetch(url, {
@@ -123,21 +116,18 @@ export function HistoryView() {
 
       if (!response.ok) {
         const errText = await response.text();
-        alert(`Export failed: ${errText}`);
+        alert(`Export thất bại: ${errText}`);
         return;
       }
 
-      // Get filename from Content-Disposition header, fallback to default
       const disposition = response.headers.get("Content-Disposition");
       let filename = "sota_statworks_report.pdf";
       if (disposition) {
         const match = disposition.match(/filename=([^;]+)/);
         if (match) filename = match[1].trim().replace(/"/g, "");
-        // Ensure .pdf extension
         if (!filename.toLowerCase().endsWith(".pdf")) filename += ".pdf";
       }
 
-      // Create blob and trigger download
       const blob = await response.blob();
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -149,15 +139,16 @@ export function HistoryView() {
       URL.revokeObjectURL(blobUrl);
     } catch (err) {
       console.error("PDF export error:", err);
-      alert("Failed to export PDF. Please try again.");
+      alert("Không thể export PDF. Vui lòng thử lại.");
     } finally {
       setIsExporting(false);
     }
   };
 
   const handleClickEntry = (entry: HistoryEntry) => {
-    const viewMap: Record<string, "chat" | "data-viewer" | "dashboard"> = {
-      chat: "chat", data: "data-viewer", dashboard: "dashboard",
+    const viewMap: Record<string, "chat" | "data-viewer"> = {
+      chat: "chat",
+      data: "data-viewer",
     };
     setActiveView(viewMap[entry.category] || "chat");
   };
@@ -168,11 +159,11 @@ export function HistoryView() {
       const now = new Date();
       const diff = now.getTime() - d.getTime();
       const mins = Math.floor(diff / 60000);
-      if (mins < 1) return "Just now";
-      if (mins < 60) return `${mins}m ago`;
+      if (mins < 1) return "Vừa xong";
+      if (mins < 60) return `${mins} phút trước`;
       const hours = Math.floor(mins / 60);
-      if (hours < 24) return `${hours}h ago`;
-      return d.toLocaleString("en-GB", {
+      if (hours < 24) return `${hours} giờ trước`;
+      return d.toLocaleString("vi-VN", {
         day: "2-digit", month: "short", year: "numeric",
         hour: "2-digit", minute: "2-digit",
       });
@@ -188,21 +179,21 @@ export function HistoryView() {
         <div className="hist-header-left">
           <div className="hist-icon-wrap">🕐</div>
           <div>
-            <h2 className="hist-title">History</h2>
+            <h2 className="hist-title">Lịch Sử</h2>
             <p className="hist-subtitle">
               {entries.length > 0
-                ? `${entries.length} entr${entries.length !== 1 ? "ies" : "y"}`
-                : "Activity log"}
+                ? `${entries.length} mục`
+                : "Nhật ký hoạt động"}
             </p>
           </div>
         </div>
         <button className="hist-export" onClick={handleExport} disabled={isExporting}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-          {isExporting ? "Generating…" : "Export PDF"}
+          {isExporting ? "Đang tạo…" : "Export PDF"}
         </button>
       </div>
 
-      {/* ── Ribbon Tabs ────────────────────────────────────── */}
+      {/* ── Ribbon Tabs — Only Chat and Viewer ─────────────── */}
       <div className="hist-tabs">
         {TABS.map((t) => (
           <button
@@ -224,31 +215,27 @@ export function HistoryView() {
         <div className="hist-filter-row">
           <div className="hist-filter-dates">
             <div className="hist-date-field">
-              <span className="hist-date-lbl">From</span>
+              <span className="hist-date-lbl">Từ</span>
               <input type="datetime-local" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="hist-date-input" />
             </div>
             <span className="hist-date-sep">—</span>
             <div className="hist-date-field">
-              <span className="hist-date-lbl">To</span>
+              <span className="hist-date-lbl">Đến</span>
               <input type="datetime-local" value={toDate} onChange={(e) => setToDate(e.target.value)} className="hist-date-input" />
             </div>
           </div>
           <div className="hist-presets">
             {[
-              { label: "5m", mins: 5 },
-              { label: "10m", mins: 10 },
-              { label: "30m", mins: 30 },
+              { label: "5p", mins: 5 },
+              { label: "30p", mins: 30 },
               { label: "1h", mins: 60 },
               { label: "3h", mins: 180 },
-              { label: "12h", mins: 720 },
-              { label: "Today", mins: 0 },
-              { label: "7d", mins: 10080 },
-              { label: "30d", mins: 43200 },
-              { label: "All", mins: null },
+              { label: "Hôm nay", mins: 0 },
+              { label: "7 ngày", mins: 10080 },
+              { label: "Tất cả", mins: null },
             ].map((p) => (
               <button key={p.label} onClick={() => {
                 if (p.mins === 0) {
-                  // "Today" special case: from start of today
                   const now = new Date();
                   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
                   setFromDate(startOfDay.toISOString().slice(0, 16));
@@ -267,21 +254,19 @@ export function HistoryView() {
         {isLoading ? (
           <div className="hist-loading">
             <div className="hist-spinner" />
-            <p>Loading…</p>
+            <p>Đang tải…</p>
           </div>
         ) : entries.length === 0 ? (
           <div className="hist-empty">
             <div className="hist-empty-icon">{activeTabConfig.icon}</div>
-            <h3 className="hist-empty-title">No {activeTabConfig.label} history</h3>
+            <h3 className="hist-empty-title">Chưa có lịch sử {activeTabConfig.label}</h3>
             <p className="hist-empty-desc">
               {tab === "chat"
-                ? "Chat with AI — sessions are automatically saved."
-                : tab === "data"
-                ? "Edit data in the Data Viewer — changes are saved automatically."
-                : "Run analyses in Dashboard — results are saved automatically."}
+                ? "Phân tích hồ sơ với AI — các cuộc hội thoại được lưu tự động."
+                : "Xem dữ liệu trong Data Viewer — lịch sử được lưu tự động."}
             </p>
-            <button className="hist-empty-cta" onClick={() => setActiveView(tab === "chat" ? "chat" : tab === "data" ? "data-viewer" : "dashboard")}>
-              Go to {activeTabConfig.label} →
+            <button className="hist-empty-cta" onClick={() => setActiveView(tab === "chat" ? "chat" : "data-viewer")}>
+              Đến {activeTabConfig.label} →
             </button>
           </div>
         ) : (

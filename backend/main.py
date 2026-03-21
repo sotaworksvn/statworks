@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +17,6 @@ from backend.models import (
     CreateConversationRequest,
     CreateMessageRequest,
     DatasetContentResponse,
-    DatasetContentUpdateRequest,
     DatasetItem,
     DatasetListResponse,
     MessageItem,
@@ -28,8 +26,8 @@ from backend.models import (
 )
 from backend.upload import router as upload_router
 from backend.analyze import router as analyze_router
-from backend.simulate import router as simulate_router
-from backend.store import get_entry, get_or_restore_entry, set_entry
+from backend.store import get_or_restore_entry
+from backend.models import ScholarshipSimulateRequest, ScholarshipSimulateResponse
 
 logger = logging.getLogger(__name__)
 
@@ -145,12 +143,6 @@ async def get_dataset_content(
     limit: int = 500,
     offset: int = 0,
 ) -> DatasetContentResponse:
-    """Retrieve the parsed content of a dataset for the Data Viewer.
-
-    Returns a paginated slice of the DataFrame as a list of row dicts
-    plus column metadata.  Default: first 500 rows (fast render).
-    Max: 5000 rows per request.
-    """
     limit = min(max(1, limit), 5000)
     offset = max(0, offset)
 
@@ -186,42 +178,6 @@ async def get_dataset_content(
         context_text=entry.context_text,
     )
 
-
-@datasets_router.put("/data/{dataset_id}/content")
-async def update_dataset_content(
-    dataset_id: str,
-    body: DatasetContentUpdateRequest,
-) -> dict[str, str]:
-    """Update a single cell value in the in-memory dataset.
-
-    Used by the Data Viewer for inline editing.
-    Changes are ephemeral (not persisted to R2 in v1).
-    """
-    entry = await get_entry(dataset_id)
-    if entry is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Dataset not found. It may have been evicted from cache.",
-        )
-
-    df = entry.dataframe
-    if body.column_name not in df.columns:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Column '{body.column_name}' not found. Available: {list(df.columns)}",
-        )
-
-    if body.row_index < 0 or body.row_index >= len(df):
-        raise HTTPException(
-            status_code=422,
-            detail=f"Row index {body.row_index} out of range [0, {len(df) - 1}].",
-        )
-
-    # Update the cell value
-    df.at[body.row_index, body.column_name] = body.new_value  # type: ignore[assignment]
-    await set_entry(entry)
-
-    return {"status": "ok", "message": f"Updated [{body.row_index}, {body.column_name}]"}
 
 
 # ---------------------------------------------------------------------------
@@ -375,8 +331,8 @@ async def list_history(
 async def save_history(body: _HistorySaveRequest, request: Request):
     """Save a history snapshot (autosave from frontend)."""
     user_id = get_current_user_id(request) or "anonymous"
-    if body.category not in ("chat", "data", "dashboard"):
-        raise HTTPException(status_code=400, detail="category must be chat|data|dashboard")
+    if body.category not in ("chat", "data"):
+        raise HTTPException(status_code=400, detail="category must be chat|data")
     entry = _hs_save(
         user_id=user_id,
         category=body.category,
@@ -387,62 +343,30 @@ async def save_history(body: _HistorySaveRequest, request: Request):
 
 
 # ---------------------------------------------------------------------------
-# Cell Editing  (PATCH /datasets/{file_id}/cells)
+# Scholarship Simulation (EdTech Track)
 # ---------------------------------------------------------------------------
 
 
-class CellEdit(_HBase):
-    """A single cell edit."""
-    row: int | None = None           # direct row index (0-based)
-    column: str                       # target column
-    value: Any                       # new value
-    filter_column: str | None = None  # for AI: match rows where filter_column == filter_value
-    filter_value: str | None = None
+@app.post("/api/scholarship/simulate", response_model=ScholarshipSimulateResponse)
+async def scholarship_simulate(body: ScholarshipSimulateRequest) -> ScholarshipSimulateResponse:
+    """Simulate how improving academic metrics affects scholarship chance."""
+    from backend.scholarship.simulate import simulate_improvement
+    from backend.context.extractor import extract_student_profile
 
-
-class CellEditBatch(_HBase):
-    edits: list[CellEdit]
-
-
-@app.patch("/api/data/{file_id}/cells")
-async def patch_cells(file_id: str, body: CellEditBatch):
-    """Apply batch cell edits to the in-memory DataFrame."""
-    from backend.store import get_entry, set_entry
-
-    entry = await get_entry(file_id)
+    entry = await get_or_restore_entry(body.file_id)
     if entry is None:
-        raise HTTPException(status_code=404, detail="Dataset not found")
+        raise HTTPException(status_code=404, detail="Dataset not found. Please upload your profile first.")
 
     df = entry.dataframe
-    applied = 0
+    profile = extract_student_profile(df, entry.context_text, df.columns.tolist())
 
-    for edit in body.edits:
-        if edit.column not in df.columns:
-            continue
+    result = simulate_improvement(profile, body.school_name, body.improvements)
 
-        if edit.filter_column and edit.filter_value is not None:
-            # AI-driven: find rows matching filter
-            if edit.filter_column not in df.columns:
-                continue
-            mask = df[edit.filter_column].astype(str) == str(edit.filter_value)
-            if mask.any():
-                df.loc[mask, edit.column] = edit.value
-                applied += mask.sum()
-        elif edit.row is not None and 0 <= edit.row < len(df):
-            # Direct row index edit
-            df.iloc[edit.row, df.columns.get_loc(edit.column)] = edit.value
-            applied += 1
-
-    entry.dataframe = df
-    entry.row_count = len(df)
-    await set_entry(entry)
-
-    return {"status": "ok", "applied": int(applied), "row_count": len(df)}
+    return ScholarshipSimulateResponse(**result)
 
 
 # ---------------------------------------------------------------------------
 # PDF Export — MUST be registered BEFORE /api/history/{entry_id}
-# to avoid FastAPI route conflict (Bug #1 fix)
 # ---------------------------------------------------------------------------
 
 
@@ -688,7 +612,6 @@ async def get_history_entry(entry_id: str):
 
 app.include_router(upload_router, prefix="/api")
 app.include_router(analyze_router, prefix="/api/chat")
-app.include_router(simulate_router, prefix="/api/monitor")
 app.include_router(datasets_router, prefix="/api")
 app.include_router(conversations_router, prefix="/api/chat")
 

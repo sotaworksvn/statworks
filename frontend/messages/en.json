@@ -1,0 +1,122 @@
+{
+  "common": {
+    "launchApp": "Get Started",
+    "learnMore": "Learn More",
+    "tryNow": "Try Now",
+    "free": "Free"
+  },
+  "landing": {
+    "badge": "EdTech Track by ETEST",
+    "heroTitle1": "From Profile to Scholarship",
+    "heroTitle2": "— In Just 60 Seconds.",
+    "heroSubtitle": "Upload transcripts, CVs, certificates. AI automatically finds 100+ matching schools and predicts your scholarship chances.",
+    "problemTitle": "The Current Reality",
+    "problemSubtitle": "Over 56,000 Vietnamese students apply abroad each year without knowing their real chances.",
+    "problems": {
+      "blind": {
+        "title": "Blind Applications",
+        "desc": "Applying to 10-20 schools without knowing which ones truly fit. Wasted time, money, and opportunities."
+      },
+      "expensive": {
+        "title": "High Costs",
+        "desc": "$50-100 application fee per school. Scholarships are unevenly distributed. Many miss opportunities due to lack of information."
+      },
+      "noTool": {
+        "title": "No Tools Available",
+        "desc": "No scientific tool to quantify chances. Relying only on gut feelings and inaccurate advice."
+      }
+    },
+    "solutionTitle": "Our Solution",
+    "solutionSubtitle": "One platform. All the information. The right decision.",
+    "solutions": {
+      "upload": {
+        "title": "Upload Your Profile",
+        "desc": "Drag and drop transcripts, CVs, IELTS/SAT certificates. AI extracts information in seconds."
+      },
+      "research": {
+        "title": "AI Researches 100+ Schools",
+        "desc": "System searches real-time admission and scholarship data from 100+ top universities worldwide."
+      },
+      "predict": {
+        "title": "Scientific Prediction",
+        "desc": "Using advanced data analysis to calculate acceptance and scholarship probability for each school."
+      },
+      "simulate": {
+        "title": "Improvement Simulation",
+        "desc": "What if SAT increases by 100 points? See immediately how chances at dream schools improve."
+      }
+    },
+    "howItWorksTitle": "How It Works",
+    "steps": {
+      "upload": "Upload your profile",
+      "uploadDesc": "Drag and drop transcripts, CVs, certificates. Multiple file formats supported.",
+      "auto": "AI analyzes automatically",
+      "autoDesc": "System extracts information and searches for matching school data.",
+      "result": "View predictions",
+      "resultDesc": "Get categorized school list: Dream, Target, Safety.",
+      "simulate": "Simulate improvements",
+      "simulateDesc": "Adjust factors to see how chances change.",
+      "apply": "Apply smartly",
+      "applyDesc": "Submit applications to suitable schools with a clear strategy."
+    },
+    "compareTitle": "Why Choose Us?",
+    "compare": {
+      "scholarship": "Scholarship prediction",
+      "realtime": "Real-time data",
+      "profile": "Auto profile extraction",
+      "science": "Scientific analysis",
+      "vietnam": "Optimized for Vietnamese students",
+      "free": "Free to use"
+    },
+    "techTitle": "Technology",
+    "teamTitle": "Development Team",
+    "teamDesc": "Phú Nhuận Builder × SOTA Works — Building AI tools to help Vietnamese students access international education opportunities.",
+    "ctaTitle": "Ready to Start?",
+    "ctaSubtitle": "From profile to scholarship prediction in under 1 minute. Completely free.",
+    "footer": "SOTA StatWorks — From Profile to Scholarship, Fast & Accurate. © 2026"
+  },
+  "app": {
+    "upload": {
+      "title": "Upload Profile",
+      "dropzone": "Drag and drop files here or click to select",
+      "maxFiles": "Maximum 15 files",
+      "formats": "Supported: Excel, CSV, Word, PDF, PowerPoint",
+      "processing": "Processing..."
+    },
+    "chat": {
+      "title": "Profile Analysis",
+      "placeholder": "Enter a question or let AI analyze automatically...",
+      "analyzing": "Analyzing profile..."
+    },
+    "viewer": {
+      "title": "View Data",
+      "noData": "No data yet. Please upload your profile first."
+    },
+    "history": {
+      "title": "History",
+      "chat": "Analysis",
+      "viewer": "Data View",
+      "noHistory": "No history yet."
+    }
+  },
+  "scholarship": {
+    "title": "Scholarship Prediction",
+    "dream": "Dream",
+    "target": "Target",
+    "safety": "Safety",
+    "matchScore": "Match Score",
+    "strengths": "Strengths",
+    "weaknesses": "Needs Improvement",
+    "simulate": {
+      "title": "Improvement Simulation",
+      "selectSchool": "Select school",
+      "selectFactor": "Select factor to change",
+      "newValue": "New value",
+      "result": "New result",
+      "change": "Change",
+      "levelChange": "Level change"
+    },
+    "recommendation": "Recommendation",
+    "factors": "Influencing Factors"
+  }
+}

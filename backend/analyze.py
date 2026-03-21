@@ -137,6 +137,10 @@ async def analyze(body: AnalyzeRequest) -> AnalyzeResponse:
                 suggestion=reason,
             )
 
+        # ── scholarship_prediction: EdTech track ──
+        if intent in ("scholarship_prediction", "scholarship", "predict_scholarship", "school_matching"):
+            return await _handle_scholarship_prediction(entry, df, column_names)
+
         # ── data_edit: modify dataset values ──
         if intent == "data_edit":
             return await _handle_data_edit(df, cleaned, column_names, body)
@@ -1054,4 +1058,95 @@ async def _handle_general_question(
             recommendation="Try asking 'What drives [variable]?' for statistical analysis.",
             model_type=None, decision_trace=_no_trace,
             result_type="general",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Scholarship Prediction Handler (EdTech Track)
+# ---------------------------------------------------------------------------
+
+async def _handle_scholarship_prediction(entry: object, df, column_names: list) -> "AnalyzeResponse":
+    """Handle scholarship prediction flow.
+
+    1. Extract student profile from uploaded files
+    2. Score against school database
+    3. Return ranked matches with dream/target/safety classification
+    """
+    from backend.context.extractor import extract_student_profile
+    from backend.scholarship.engine import predict_scholarship
+
+    try:
+        # Extract profile
+        context_text = getattr(entry, "context_text", None)
+        profile = extract_student_profile(df, context_text, column_names)
+
+        # Predict matches
+        matches = predict_scholarship(profile)
+
+        # Count by level
+        n_dream = sum(1 for m in matches if m["match_level"] == "dream")
+        n_target = sum(1 for m in matches if m["match_level"] == "target")
+        n_safety = sum(1 for m in matches if m["match_level"] == "safety")
+
+        # Build summary
+        profile_desc = []
+        if profile.get("gpa"):
+            profile_desc.append(f"GPA {profile['gpa']}")
+        if profile.get("sat_score"):
+            profile_desc.append(f"SAT {profile['sat_score']}")
+        if profile.get("ielts_score"):
+            profile_desc.append(f"IELTS {profile['ielts_score']}")
+
+        profile_str = ", ".join(profile_desc) or "hồ sơ của bạn"
+        summary = (
+            f"Dựa trên {profile_str}, AI đã tìm thấy {len(matches)} trường phù hợp: "
+            f"{n_dream} trường Mơ ước, {n_target} trường Phù hợp, {n_safety} trường An toàn."
+        )
+
+        recommendation = (
+            f"Chiến lược đề xuất: Nộp đơn 2-3 trường Mơ ước, 5-7 trường Phù hợp, và 2-3 trường An toàn. "
+            f"Sử dụng tính năng Mô Phỏng để xem cơ hội tăng lên khi cải thiện điểm SAT hoặc GPA."
+        )
+
+        # Format as SchoolMatch list
+        school_matches = [
+            {
+                "school_name": m["school_name"],
+                "country": m["country"],
+                "match_score": m["match_score"],
+                "match_level": m["match_level"],
+                "strengths": m["strengths"],
+                "weaknesses": m["weaknesses"],
+            }
+            for m in matches
+        ]
+
+        return AnalyzeResponse(
+            summary=summary,
+            drivers=[], r2=None,
+            recommendation=recommendation,
+            model_type="scholarship_pls",
+            decision_trace=DecisionTrace(
+                score_pls=0.0, score_reg=0.0,
+                engine_selected="scholarship_pls",
+                reason="EdTech: Student profile matched against school database",
+            ),
+            result_type="scholarship_prediction",
+            school_matches=school_matches,
+            student_profile=profile,
+        )
+
+    except Exception as exc:
+        logger.error("Scholarship prediction failed: %s", exc, exc_info=True)
+        return AnalyzeResponse(
+            summary="Không thể dự đoán học bổng. Hãy upload bảng điểm hoặc CV chứa thông tin GPA, SAT, IELTS.",
+            drivers=[], r2=None,
+            recommendation="Vui lòng upload file có chứa thông tin: GPA, SAT score, IELTS/TOEFL score.",
+            model_type=None,
+            decision_trace=DecisionTrace(
+                score_pls=0.0, score_reg=0.0, engine_selected=None,
+                reason=f"Scholarship prediction error: {exc}",
+            ),
+            result_type="scholarship_prediction",
+            not_supported=True,
         )

@@ -4,6 +4,7 @@ import { useAppStore } from "@/lib/store";
 import { useRouter } from "next/navigation";
 import type { ActiveView } from "@/lib/types";
 import { useUser, UserButton } from "@clerk/nextjs";
+import { LanguageSwitcher } from "@/components/language-switcher";
 
 /* ─── Sidebar Navigation Items ───────────────────────────────────────────── */
 
@@ -11,16 +12,16 @@ interface NavItem {
   id: ActiveView;
   label: string;
   icon: string;
-  gated: boolean; // requires uploaded data to be accessible
-  path: string;   // URL path for browser routing
+  gated: boolean;
+  path: string;
 }
 
+// Monitor removed — only Upload, Chat, Data Viewer, History
 const NAV_ITEMS: NavItem[] = [
   { id: "upload", label: "Upload", icon: "➕", gated: false, path: "/app" },
-  { id: "chat", label: "AI Chat", icon: "🗨️", gated: true, path: "/app/chat" },
-  { id: "data-viewer", label: "Data Viewer", icon: "📊", gated: true, path: "/app/viewer" },
-  { id: "dashboard", label: "Monitor", icon: "📈", gated: true, path: "/app/monitor" },
-  { id: "history", label: "History", icon: "📋", gated: false, path: "/app/history" },
+  { id: "chat", label: "Phân tích", icon: "🎓", gated: true, path: "/app/chat" },
+  { id: "data-viewer", label: "Xem dữ liệu", icon: "📊", gated: true, path: "/app/viewer" },
+  { id: "history", label: "Lịch sử", icon: "📋", gated: false, path: "/app/history" },
 ];
 
 /* ─── Component ──────────────────────────────────────────────────────────── */
@@ -59,7 +60,7 @@ export function Sidebar() {
               className={`sidebar-item ${isActive ? "sidebar-item--active" : ""} ${isDisabled ? "sidebar-item--disabled" : ""}`}
               onClick={() => !isDisabled && handleNav(item)}
               disabled={isDisabled}
-              title={isDisabled ? `Upload data to unlock ${item.label}` : item.label}
+              title={isDisabled ? `Upload hồ sơ để mở khóa ${item.label}` : item.label}
             >
               <span className="sidebar-item-icon">{item.icon}</span>
               <span className="sidebar-item-label">{item.label}</span>
@@ -70,6 +71,11 @@ export function Sidebar() {
 
       {/* ── Spacer ────────────────────────────────────────────── */}
       <div className="sidebar-spacer" />
+
+      {/* ── Language Switcher ─────────────────────────────────── */}
+      <div className="sidebar-lang px-3 pb-2">
+        <LanguageSwitcher />
+      </div>
 
       {/* ── User Account ──────────────────────────────────────── */}
       <div className="sidebar-account">
@@ -82,7 +88,7 @@ export function Sidebar() {
         />
         {user && (
           <span className="sidebar-account-name">
-            {user.firstName || "Account"}
+            {user.firstName || "Tài khoản"}
           </span>
         )}
       </div>

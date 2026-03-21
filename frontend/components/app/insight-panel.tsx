@@ -18,6 +18,8 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ScholarshipResults } from "@/components/scholarship/scholarship-results";
+import { SimulationPanel } from "@/components/scholarship/simulation-panel";
 
 export function InsightPanel() {
   const { insight, isAnalyzing } = useAppStore();
@@ -65,6 +67,16 @@ export function InsightPanel() {
         <p className="text-gray-400 text-xs">
           Try asking: &quot;What affects retention?&quot;
         </p>
+      </section>
+    );
+  }
+
+  // ── Scholarship prediction (EdTech Track) ──
+  if (insight.result_type === "scholarship_prediction" && insight.school_matches) {
+    return (
+      <section className="flex flex-1 flex-col p-4 gap-4 overflow-y-auto">
+        <ScholarshipResults insight={insight} />
+        <SimulationPanel />
       </section>
     );
   }
