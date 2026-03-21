@@ -239,9 +239,9 @@ cd frontend && npm run build
 
 | Name | Role | GitHub |
 |------|------|--------|
-| **Nguyễn Ngọc Gia Bảo** | Team Leader · Backend Dev · Vice OpenAI Integrated · Vice Frontend Dev | [@bernieweb3](https://github.com/bernieweb3) |
-| **Đặng Đình Tiến** | UI/UX & Frontend Dev | [@Kaitobaee](https://github.com/Kaitobaee) |
-| **Đỗ Phúc Duy** | Vice Frontend Dev & Pitching Personnel | [@dophucduy](https://github.com/dophucduy) |
+| **Nguyễn Ngọc Gia Bảo** | Team Leader · Fullstack Dev | [@bernieweb3](https://github.com/bernieweb3) |
+| **Đặng Đình Tiến** | UI/UX Advisor · Tester | [@Kaitobaee](https://github.com/Kaitobaee) |
+| **Đỗ Phúc Duy** | Tester · Pitching Personnel | [@dophucduy](https://github.com/dophucduy) |
 
 ### 📧 Contact
 
