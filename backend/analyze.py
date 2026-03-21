@@ -699,7 +699,9 @@ async def _handle_data_edit(
         for col in date_cols_from_edits:
             original = df[col].copy()
             parsed_1 = pd.to_datetime(df[col], dayfirst=dayfirst, errors="coerce")
-            parsed_2 = pd.to_datetime(df[col], format="ISO8601", errors="coerce")
+            parsed_2 = pd.to_datetime(df[col], format="%Y-%m-%dT%H:%M:%S", errors="coerce").fillna(
+                pd.to_datetime(df[col], format="%Y-%m-%d", errors="coerce")
+            )
             converted = parsed_1.fillna(parsed_2)
             formatted = converted.dt.strftime(strftime_fmt)
 

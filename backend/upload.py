@@ -249,7 +249,9 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
     if "Ngày" in df.columns:
         original = df["Ngày"].copy()
         parsed_1 = pd.to_datetime(df["Ngày"], dayfirst=True, errors="coerce")
-        parsed_2 = pd.to_datetime(df["Ngày"], format="ISO8601", errors="coerce")
+        parsed_2 = pd.to_datetime(df["Ngày"], format="%Y-%m-%dT%H:%M:%S", errors="coerce").fillna(
+            pd.to_datetime(df["Ngày"], format="%Y-%m-%d", errors="coerce")
+        )
         converted = parsed_1.fillna(parsed_2)
         df["Ngày"] = converted.dt.strftime("%d/%m/%Y").where(converted.notna(), original)
 
