@@ -8,6 +8,7 @@ import { Sidebar } from "@/components/app/sidebar";
 import { UploadZone } from "@/components/app/upload-zone";
 import { ChatPanel } from "@/components/app/chat-panel";
 import { InsightPanel } from "@/components/app/insight-panel";
+import { SimulationBar } from "@/components/app/simulation-bar";
 import { DataViewer } from "@/components/app/data-viewer";
 import { HistoryView } from "@/components/app/history-view";
 import { Toaster } from "@/components/ui/sonner";
@@ -150,10 +151,13 @@ export default function AppPage() {
         {activeView === "chat" && (
           <div className="app-view app-view--chat">
             {fileId ? (
-              <main className="chat-layout">
-                <ChatPanel />
-                <InsightPanel />
-              </main>
+              <>
+                <main className="chat-layout">
+                  <ChatPanel />
+                  <InsightPanel />
+                </main>
+                <SimulationBar />
+              </>
             ) : (
               <div className="app-view-empty">
                 <div className="app-view-empty-icon">💬</div>

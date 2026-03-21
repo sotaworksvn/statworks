@@ -9,14 +9,20 @@ export function LanguageSwitcher() {
   const pathname = usePathname();
 
   const switchLocale = (newLocale: string) => {
-    // Replace /<currentLocale> prefix with /<newLocale>
-    const segments = pathname.split("/");
-    if (segments[1] === locale) {
-      segments[1] = newLocale;
+    // With localePrefix: "as-needed":
+    //   "vi" (default) → no prefix in URL  e.g. /  or /app/chat
+    //   "en"           → /en prefix        e.g. /en or /en/app/chat
+    //
+    // Strategy: strip any known locale prefix, then re-add the target prefix.
+    const stripped = pathname.replace(/^\/(vi|en)(?=\/|$)/, "") || "/";
+
+    if (newLocale === "vi") {
+      // Default locale — no prefix needed
+      router.push(stripped);
     } else {
-      segments.splice(1, 0, newLocale);
+      // Non-default — add /en prefix
+      router.push(`/${newLocale}${stripped === "/" ? "" : stripped}`);
     }
-    router.push(segments.join("/") || "/");
   };
 
   return (
