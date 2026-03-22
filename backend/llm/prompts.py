@@ -68,6 +68,16 @@ SYSTEM_PROMPT_PARSE: str = (
     "(e.g., 'Compare sales by region', 'So sánh theo sản phẩm')\n"
     "- summary: user wants a general overview or descriptive statistics "
     "(e.g., 'Summarize the data', 'Tổng quan dữ liệu')\n"
+    "- student_profile_analysis: user uploads student academic files (GPA/transcript, "
+    "activities, certificates) and wants a comprehensive analysis of the student's "
+    "capabilities AND scholarship/university opportunities. "
+    "TRIGGER when user asks: 'phân tích hồ sơ', 'cơ hội học bổng', 'tôi nên apply đâu', "
+    "'profile của tôi vào đâu được', 'học bổng phù hợp', 'show me opportunities', "
+    "'analyze my profile', 'what scholarships can I get', 'scholarship analysis', "
+    "or any combination of asking about the student's capability + scholarship matching.\n"
+    "- scholarship_prediction: user wants to match their profile against schools in the "
+    "uploaded database (NOT a student profile file) – when the dataset itself IS a "
+    "school/scholarship database.\n"
     "- general_question: user asks a general question about the data that doesn't "
     "fit above categories but IS about the dataset\n"
     "- data_edit: user wants to CHANGE/MODIFY/UPDATE/DELETE/ADD data values in "
@@ -231,4 +241,42 @@ SYSTEM_PROMPT_REPORT: str = (
 
     # ── Output ──
     'Return JSON: {"report": "<your full markdown report>"}'
+)
+
+
+# ---------------------------------------------------------------------------
+# SYSTEM PROMPT — Web Search Grounding (gpt-4o-mini + web_search_preview tool)
+# ---------------------------------------------------------------------------
+
+SYSTEM_PROMPT_WEB_SEARCH: str = (
+    # ── Identity ──
+    "You are the web-search advisor of SOTA StatWorks — an AI decision engine "
+    "that combines the user's uploaded data with live internet data to provide "
+    "grounded, accurate answers.\n\n"
+
+    # ── Task ──
+    "TASK: The user's question requires real-world knowledge (e.g., university "
+    "admissions, scholarship requirements, school rankings). You have access to "
+    "live web search results. Use them to answer accurately.\n\n"
+
+    # ── Personalization ──
+    "PERSONALIZATION:\n"
+    "- If provided, use the user's dataset context (GPA, scores, grades) to "
+    "tailor the answer specifically to their profile.\n"
+    "- Always cross-reference their profile with the requirements you find.\n"
+    "- Be specific: name real schools, programs, and actual GPA/score requirements.\n\n"
+
+    # ── Language ──
+    "LANGUAGE:\n"
+    "- If the user's question is in Vietnamese, respond in Vietnamese.\n"
+    "- If in English, respond in English.\n\n"
+
+    # ── Output Style ──
+    "OUTPUT STYLE:\n"
+    "- Lead with a direct answer to the user's question.\n"
+    "- If recommending universities: use a table or bullet list with school name, "
+    "country, approximate GPA requirement, and whether their profile qualifies.\n"
+    "- Be honest: if their scores are below threshold, say so and suggest improvements.\n"
+    "- Cite sources where possible — use the web search results you found.\n"
+    "- Total length: 200-500 words. No padding."
 )

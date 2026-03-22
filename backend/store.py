@@ -31,6 +31,7 @@ class FileEntry:
         "content_hash",
         "file_name",
         "file_type",
+        "secondary_dataframes",  # dict[filename, DataFrame] for multi-file uploads
     )
 
     def __init__(
@@ -46,6 +47,7 @@ class FileEntry:
         content_hash: str | None = None,
         file_name: str | None = None,
         file_type: str | None = None,
+        secondary_dataframes: dict[str, pd.DataFrame] | None = None,
     ) -> None:
         self.file_id = file_id
         self.dataframe = dataframe
@@ -58,6 +60,7 @@ class FileEntry:
         self.content_hash = content_hash
         self.file_name = file_name
         self.file_type = file_type
+        self.secondary_dataframes = secondary_dataframes or {}
 
 
 # ---------------------------------------------------------------------------

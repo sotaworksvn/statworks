@@ -306,7 +306,21 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
     if clerk_user_id and r2.is_available():
         r2_key = r2.make_dataset_key(clerk_user_id, file_id, primary_ext)
 
-    # 7. Store entry in-memory (cache)
+    # 7. Parse secondary Excel/CSV files and store them
+    secondary_dataframes: dict[str, pd.DataFrame] = {}
+    for fn, ext, data in primary_files[1:]:  # skip the first (primary) file
+        try:
+            if ext in (".xlsx", ".xls"):
+                sec_df = _parse_excel(data, ext)
+            else:
+                sec_df = _parse_csv(data)
+            sec_df.columns = sec_df.columns.str.strip()
+            secondary_dataframes[fn] = sec_df
+            logger.info("Parsed secondary file '%s' (%d rows)", fn, len(sec_df))
+        except Exception as exc:
+            logger.warning("Could not parse secondary file '%s': %s", fn, exc)
+
+    # 8. Store entry in-memory (cache)
     entry = FileEntry(
         file_id=file_id,
         dataframe=df,
@@ -318,6 +332,7 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
         content_hash=content_hash,
         file_name=primary_fn,
         file_type=primary_ext,
+        secondary_dataframes=secondary_dataframes,
     )
     await set_entry(entry)
 

@@ -26,6 +26,8 @@ import logging
 import re
 import time
 import unicodedata
+from typing import Union
+
 
 from fastapi import APIRouter, HTTPException
 
@@ -39,6 +41,7 @@ from backend.models import (
     AnalyzeResponse,
     DecisionTrace,
     DriverResult,
+    StudentProfileResponse,
 )
 from backend.router import score_model
 from backend.store import get_entry, set_entry
@@ -49,8 +52,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/analyze", response_model=AnalyzeResponse)
-async def analyze(body: AnalyzeRequest) -> AnalyzeResponse:
+@router.post("/analyze", response_model=Union[StudentProfileResponse, AnalyzeResponse])
+async def analyze(body: AnalyzeRequest) -> Union[StudentProfileResponse, AnalyzeResponse]:
     """Full AI-powered driver analysis endpoint."""
 
     try:
@@ -106,6 +109,16 @@ async def analyze(body: AnalyzeRequest) -> AnalyzeResponse:
             return _handle_gpa_goal(df, body.query)
 
         # ---------------------------------------------------------------
+        # Step 2a.2: Student profile analysis (deterministic bypass)
+        #   Triggered when user asks about scholarships/opportunities AND
+        #   the dataset looks like student academic data (THPT/GPA/CV context).
+        # ---------------------------------------------------------------
+        if _is_student_profile_query(body.query, entry):
+            elapsed = time.perf_counter() - t_start
+            logger.info("/analyze student_profile_analysis dispatch in %.3fs", elapsed)
+            return await _handle_student_profile_analysis(entry, df, column_names, body.query)
+
+        # ---------------------------------------------------------------
         # Step 2b: LLM Call 1 — intent parsing (gpt-5.4-mini)
         #          On failure → Layer 1 fallback (auto-select features)
         # ---------------------------------------------------------------
@@ -146,6 +159,14 @@ async def analyze(body: AnalyzeRequest) -> AnalyzeResponse:
                 not_supported=True,
                 suggestion=reason,
             )
+
+        # ── student_profile_analysis: 6-section comprehensive pipeline ──
+        if intent in (
+            "student_profile_analysis", "student_profile",
+            "scholarship_analysis", "profile_analysis",
+            "analyze_profile", "opportunity_analysis",
+        ):
+            return await _handle_student_profile_analysis(entry, df, column_names, body.query)
 
         # ── scholarship_prediction: EdTech track ──
         if intent in ("scholarship_prediction", "scholarship", "predict_scholarship", "school_matching"):
@@ -350,6 +371,50 @@ def _is_gpa_goal_query(query: str) -> bool:
         )
     )
     return has_goal and (has_requirement or has_pending)
+
+
+
+def _is_student_profile_query(query: str, entry: "FileEntry") -> bool:
+    """Detect student scholarship/profile analysis requests.
+
+    Returns True when:
+    1. The query contains scholarship/profile analysis keywords, AND
+    2. The dataset context looks like student academic data (THPT/GPA/certificate files).
+    """
+    from backend.store import FileEntry  # type: ignore[attr-defined]
+
+    q = _normalize_text(query)
+
+    # Query-side keywords (Vietnamese + English)
+    scholarship_kws = [
+        "hoc bong", "co hoi", "phan tich ho so", "profile", "apply dau",
+        "truong nao", "vao dau", "chon truong", "co the dat", "co the nop",
+        "recommendation", "lo trinh", "roadmap", "scholarship", "opportunity",
+        "admission", "university matching", "truong phu hop", "phu hop voi",
+        "ho so cua toi", "nang luc", "phan tich nang luc",
+        "toi co the", "kha nang dat", "xet hoc bong", "hoc bong phu hop",
+    ]
+    query_match = any(kw in q for kw in scholarship_kws)
+
+    if not query_match:
+        return False
+
+    # Context-side signals: does this look like student data?
+    # entry is a FileEntry object — use attribute access, not .get()
+    context = getattr(entry, "context_text", "") or ""
+    filename = getattr(entry, "file_name", "") or ""
+
+    student_data_signals = [
+        "thpt", "bang diem", "chung chi", "hoat dong",
+        "gpa", "toefl", "ielts", "sat", "diem so",
+        "mon hoc", "hoc ky", "hoc sinh",
+        "nguyen van an", "ho so",
+    ]
+
+    context_lower = _normalize_text(context + " " + filename)
+    context_match = any(sig in context_lower for sig in student_data_signals)
+
+    return context_match
 
 
 def _extract_gpa_target(query: str) -> float | None:
@@ -1329,7 +1394,12 @@ async def _handle_general_question(
     cleaned: "CleanedIntent",
     query: str,
 ) -> AnalyzeResponse:
-    """Handle general questions by using LLM to answer from data context."""
+    """Handle general questions by using LLM to answer from data context.
+
+    If the question requires real-world knowledge (e.g. university admissions,
+    scholarships), uses web_search_answer() for live, grounded results.
+    Otherwise falls back to LLM with data context only.
+    """
     import json
 
     _no_trace = DecisionTrace(
@@ -1337,7 +1407,49 @@ async def _handle_general_question(
         reason="Intent: general_question",
     )
 
-    # Build data summary for LLM
+    # ── Check if this query needs live web data ──
+    from backend.llm.web_search import _requires_web_search, web_search_answer
+
+    if _requires_web_search(query):
+        # Build a concise profile from the dataset for personalization
+        numeric_cols = df.select_dtypes("number").columns.tolist()
+        profile_parts: list[str] = [f"Dataset: {len(df)} rows, {len(df.columns)} columns"]
+
+        if numeric_cols:
+            try:
+                summary_stats = df[numeric_cols].describe().round(2)
+                # Compact version: just means
+                means = {col: round(float(df[col].dropna().mean()), 2) for col in numeric_cols[:8]}
+                profile_parts.append(
+                    "Column averages: " + ", ".join(f"{k}={v}" for k, v in means.items())
+                )
+            except Exception:
+                pass
+
+        dataset_context = "\n".join(profile_parts)
+
+        try:
+            result = await web_search_answer(query=query, context=dataset_context)
+
+            if result is not None:
+                formatted_answer = result.format_with_citations()
+                return AnalyzeResponse(
+                    summary=formatted_answer,
+                    drivers=[], r2=None,
+                    recommendation=(
+                        "Kết quả trên được tổng hợp từ dữ liệu web thực tế. "
+                        "Hãy xác nhận thêm với trang chính thức của trường."
+                        if any(c > 127 for c in map(ord, query))
+                        else "Results sourced from live web data. Verify with official university websites for the most current requirements."
+                    ),
+                    model_type=None, decision_trace=_no_trace,
+                    result_type="general",
+                    table_data={"web_search_result": True, "citations": result.citations},
+                )
+        except Exception as ws_exc:
+            logger.warning("Web search failed, falling back to data-context LLM: %s", ws_exc)
+
+    # ── Data-context fallback (no web search needed or web search failed) ──
     numeric_cols = df.select_dtypes("number").columns.tolist()
     data_summary_parts = [
         f"Dataset: {len(df)} rows, {len(df.columns)} columns",
@@ -1390,6 +1502,7 @@ async def _handle_general_question(
             model_type=None, decision_trace=_no_trace,
             result_type="general",
         )
+
 
 
 # ---------------------------------------------------------------------------
@@ -1479,5 +1592,155 @@ async def _handle_scholarship_prediction(entry: object, df, column_names: list) 
                 reason=f"Scholarship prediction error: {exc}",
             ),
             result_type="scholarship_prediction",
+            not_supported=True,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Student Profile Analysis Handler — 6-section comprehensive pipeline
+# ---------------------------------------------------------------------------
+
+async def _handle_student_profile_analysis(
+    entry: dict,
+    df: "pd.DataFrame",
+    column_names: list[str],
+    query: str,
+) -> "StudentProfileResponse":
+    """6-section student profile analysis pipeline.
+
+    Sections:
+    1. Insight về năng lực (SPSS analysis)
+    2. Insight về cơ hội (web scholarship search)
+    3. Visual: capability table/chart data
+    4. Visual: scholarship opportunities table
+    5. Recommendation roadmap
+    6. Simulation criteria config
+    """
+    from backend.student.profile_extractor import extract_student_profile_full
+    from backend.student.analyzer import analyze_student_capability
+    from backend.student.scholarship_searcher import (
+        search_scholarship_opportunities,
+        build_simulate_criteria,
+    )
+    from backend.student.roadmap import generate_roadmap
+
+    _trace = DecisionTrace(
+        score_pls=0.0, score_reg=0.0, engine_selected="StudentProfilePipeline",
+        reason="Intent: student_profile_analysis — 6-section pipeline",
+    )
+
+    try:
+        # ── Step 1: Get all uploaded file DataFrames from the store entry ──
+        # entry is a FileEntry object with .dataframe, .file_name, .context_text
+        dfs: dict[str, "pd.DataFrame"] = {}
+
+        # Primary df from the analyzed entry (FileEntry.dataframe)
+        primary_filename = getattr(entry, "file_name", None) or "primary.xlsx"
+        dfs[primary_filename] = df  # df is already entry.dataframe from the caller
+
+        # Add any secondary files uploaded alongside the primary (multi-file upload)
+        secondary = getattr(entry, "secondary_dataframes", {}) or {}
+        for sec_fn, sec_df in secondary.items():
+            dfs[sec_fn] = sec_df
+            logger.info("Added secondary file '%s' (%d rows) to profile extraction", sec_fn, len(sec_df))
+
+        logger.info(
+            "student_profile_analysis: Processing %d files: %s",
+            len(dfs), list(dfs.keys()),
+        )
+
+        # ── Step 2: Extract unified student profile ──
+        profile = extract_student_profile_full(dfs)
+        logger.info(
+            "Profile extracted: %s, GPA %s, tier %s",
+            profile.get("name"), profile.get("gpa_10"), profile.get("overall_tier"),
+        )
+
+        # ── Step 3: SPSS-equivalent capability analysis ──
+        capability = analyze_student_capability(profile)
+
+        # ── Step 4: Web search for scholarship opportunities ──
+        try:
+            opportunities = await search_scholarship_opportunities(profile, capability)
+        except Exception as exc:
+            logger.warning("Scholarship search failed, using empty: %s", exc)
+            opportunities = []
+
+        # ── Step 5: Generate personalized roadmap ──
+        try:
+            roadmap = await generate_roadmap(profile, capability, opportunities)
+        except Exception as exc:
+            logger.warning("Roadmap generation failed: %s", exc)
+            roadmap = []
+
+        # ── Step 6: Build simulation criteria ──
+        simulate_criteria = build_simulate_criteria(profile, opportunities)
+
+        # ── Assemble the summary ──
+        name = profile.get("name", "Học sinh")
+        tier = profile.get("overall_tier", "")
+        gpa_10 = profile.get("gpa_10", "?")
+        n_opp = len(opportunities)
+        key_insights = capability.get("key_insights", [])
+
+        summary = (
+            f"**{name}** — {tier}\n\n"
+            + "\n".join(f"• {ins}" for ins in key_insights[:4])
+        )
+
+        # Recommendation: top roadmap milestone as teaser
+        if roadmap:
+            first_milestone = roadmap[0]
+            top_actions = first_milestone.get("milestones", [])[:2]
+            recommendation = (
+                f"🗓 **{first_milestone.get('month', '')}**: "
+                + " → ".join(top_actions)
+            )
+        else:
+            recommendation = (
+                f"Phân tích hoàn thành. Tìm thấy {n_opp} cơ hội học bổng phù hợp với profile {tier}."
+            )
+
+        return StudentProfileResponse(
+            summary=summary,
+            drivers=[], r2=None,
+            recommendation=recommendation,
+            model_type=None,
+            decision_trace=_trace,
+            result_type="student_profile_analysis",
+            # 6 sections
+            capability_analysis=capability,
+            scholarship_opportunities=opportunities,
+            roadmap=roadmap,
+            simulate_criteria=simulate_criteria,
+            student_profile_full=profile,
+            student_tier=tier,
+            # Legacy fields for backward compat
+            student_profile={
+                "name": name,
+                "gpa": gpa_10,
+                "gpa_4": profile.get("gpa_4"),
+                "sat_score": profile.get("sat"),
+                "ielts_score": profile.get("ielts"),
+                "toefl_score": profile.get("toefl"),
+                "major": profile.get("target_major"),
+                "country": profile.get("target_country"),
+                "tier": tier,
+            },
+            school_matches=[],
+        )
+
+    except Exception as exc:
+        logger.error("Student profile analysis failed: %s", exc, exc_info=True)
+        return StudentProfileResponse(
+            summary=f"Phân tích hồ sơ thất bại: {exc}",
+            drivers=[], r2=None,
+            recommendation="Vui lòng đảm bảo upload đủ 3 file: bảng điểm GPA, hoạt động ngoại khóa, và chứng chỉ.",
+            model_type=None,
+            decision_trace=DecisionTrace(
+                score_pls=0.0, score_reg=0.0, engine_selected=None,
+                reason=f"Student profile error: {exc}",
+            ),
+            result_type="student_profile_analysis",
             not_supported=True,
         )

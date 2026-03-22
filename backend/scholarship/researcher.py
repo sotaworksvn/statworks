@@ -1,7 +1,8 @@
 """
-School Research Module — Real-time Web Search Integration
+School Research Module — Real-time Web Search via OpenAI Responses API
 
-Provides live admission requirement data for scholarship prediction.
+Provides LIVE admission requirement data for scholarship prediction using
+the OpenAI web_search_preview tool (Responses API, not Chat Completions).
 Falls back to embedded database when web search is unavailable.
 
 Usage:
@@ -107,36 +108,74 @@ Return a JSON array. Use null for unknown values.
 
 
 async def _extract_requirements_via_llm(school_names: list[str]) -> list[dict[str, Any]]:
-    """Use LLM to generate/recall admission requirements for a batch of schools."""
-    from backend.llm.client import call_llm_with_retry
+    """Use OpenAI Responses API (web_search_preview) to get LIVE admission requirements.
 
-    prompt = _EXTRACT_PROMPT.format(schools=", ".join(school_names))
+    This replaces the previous chat completions approach which had no internet access
+    and would hallucinate requirements from training data.
+    """
+    from backend.llm.web_search import web_search_answer
+    import json
+
+    schools_str = ", ".join(school_names)
+    query = (
+        f"Current 2025-2026 admission requirements for international students at: {schools_str}. "
+        f"For each school, provide: minimum GPA (4.0 scale), IELTS minimum score, "
+        f"TOEFL minimum score, acceptance rate, scholarship availability for international students. "
+        f"Return as JSON array with fields: school_name, country, min_gpa, avg_gpa, "
+        f"ielts_min, toefl_min, acceptance_rate, scholarship_rate, scholarship_types."
+    )
+
     try:
+        result = await web_search_answer(query=query, context="")
+        if result is None:
+            logger.warning("Web search returned None for school requirements")
+            return []
+
+        # Try to parse JSON from the answer text
+        text = result.answer
+
+        # Find JSON array in the response
+        import re
+        json_match = re.search(r"\[.*\]", text, re.DOTALL)
+        if json_match:
+            try:
+                data = json.loads(json_match.group())
+                if isinstance(data, list):
+                    logger.info("Web search returned %d school records", len(data))
+                    return data
+            except json.JSONDecodeError:
+                pass
+
+        # If no JSON found, fall back to calling LLM with the web search answer as context
+        from backend.llm.client import call_llm_with_retry
+        prompt = (
+            f"Extract school admission requirements from this web search result and return as JSON array.\n\n"
+            f"Web search result:\n{text}\n\n"
+            f"Schools requested: {schools_str}\n\n"
+            f"Return JSON array with fields: school_name, country, min_gpa, ielts_min, toefl_min, "
+            f"acceptance_rate, scholarship_rate. Use null for unknown values."
+        )
         raw = await call_llm_with_retry(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a precise admissions data assistant. Return only valid JSON."},
+                {"role": "system", "content": "You are a precise admissions data assistant. Return only valid JSON array."},
                 {"role": "user", "content": prompt},
             ],
             response_format={"type": "json_object"},
         )
-
-        # raw may be a dict like {"schools": [...]} or directly a list
         if isinstance(raw, dict):
             for key in ("schools", "universities", "results", "data"):
                 if key in raw and isinstance(raw[key], list):
                     return raw[key]
-            # Try first list value
             for v in raw.values():
                 if isinstance(v, list):
                     return v
-            return []
         if isinstance(raw, list):
             return raw
         return []
 
     except Exception as exc:
-        logger.warning("LLM requirement extraction failed: %s", exc)
+        logger.warning("Web search requirement extraction failed: %s", exc)
         return []
 
 

@@ -64,6 +64,25 @@ class AnalyzeResponse(BaseModel):
     student_profile: dict | None = None
 
 
+class StudentProfileResponse(AnalyzeResponse):
+    """Extended response for the student_profile_analysis pipeline.
+
+    Adds the 6 sections required for the full student analysis output.
+    """
+    # Section 1 & 3: SPSS-equivalent capability analysis
+    capability_analysis: dict | None = None        # {gpa_trend, subject_stats, strength_breakdown, key_insights, ...}
+    # Section 2 & 4: Web-searched scholarship opportunities
+    scholarship_opportunities: list[dict] | None = None  # [{school_name, amount, deadline, match_score, ...}]
+    # Section 5: Personalized roadmap
+    roadmap: list[dict] | None = None             # [{month, phase, milestones, priority, notes}]
+    # Section 6: Simulate bar config
+    simulate_criteria: list[dict] | None = None   # [{key, label, type, min, max, step, current, options}]
+    # Student profile full details
+    student_profile_full: dict | None = None      # parsed StudentProfile dict
+    student_tier: str | None = None               # "Top 1%" | "Top 5%" | ...
+
+
+
 # ---------------------------------------------------------------------------
 # Scholarship (EdTech Track)
 # ---------------------------------------------------------------------------
