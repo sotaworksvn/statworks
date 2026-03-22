@@ -32,6 +32,7 @@ export function ScholarshipResults({ insight }: Props) {
 
   // Student profile summary
   const profile = insight.student_profile as Record<string, unknown> | undefined;
+  const str = (v: unknown) => (v != null && v !== "" ? String(v) : null);
 
   return (
     <div className="space-y-4">
@@ -43,34 +44,35 @@ export function ScholarshipResults({ insight }: Props) {
         {/* Profile summary chips */}
         {profile && (
           <div className="flex flex-wrap gap-2 mt-3">
-            {profile.gpa && (
+            {str(profile.gpa) && (
               <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-medium">
-                GPA {String(profile.gpa)}
+                GPA {str(profile.gpa)}
               </span>
             )}
-            {profile.sat_score && (
+            {str(profile.sat_score) && (
               <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-medium">
-                SAT {String(profile.sat_score)}
+                SAT {str(profile.sat_score)}
               </span>
             )}
-            {profile.ielts_score && (
+            {str(profile.ielts_score) && (
               <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-medium">
-                IELTS {String(profile.ielts_score)}
+                IELTS {str(profile.ielts_score)}
               </span>
             )}
-            {profile.toefl_score && (
+            {str(profile.toefl_score) && (
               <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-medium">
-                TOEFL {String(profile.toefl_score)}
+                TOEFL {str(profile.toefl_score)}
               </span>
             )}
-            {profile.major && (
+            {str(profile.major) && (
               <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-medium">
-                {String(profile.major)}
+                {str(profile.major)}
               </span>
             )}
           </div>
         )}
       </div>
+
 
       {/* Recommendation */}
       <div className="rounded-xl border border-[#FF6B4A]/20 bg-[#FF6B4A]/5 p-4">
