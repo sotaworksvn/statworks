@@ -26,11 +26,11 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-ALLOWED_PRIMARY = {".xlsx", ".csv"}
-ALLOWED_CONTEXT = {".docx", ".pptx"}
-ALLOWED_ALL = ALLOWED_PRIMARY | ALLOWED_CONTEXT
+ALLOWED_PRIMARY = {".xlsx", ".xls", ".csv"}
+ALLOWED_CONTEXT = {".docx", ".pptx", ".pdf"}
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
-MAX_FILES_PER_UPLOAD = 5
+MAX_FILES_PER_UPLOAD = 3  # EdTech: max 3 Excel/CSV files
+ALLOWED_ALL = ALLOWED_PRIMARY | ALLOWED_CONTEXT
 
 
 # ---------------------------------------------------------------------------
@@ -42,10 +42,22 @@ def _get_extension(filename: str) -> str:
     return PurePath(filename).suffix.lower()
 
 
-def _parse_excel(content: bytes) -> pd.DataFrame:
-    """Parse an .xlsx file into a DataFrame."""
+def _parse_excel(content: bytes, ext: str = ".xlsx") -> pd.DataFrame:
+    """Parse an .xlsx or .xls file into a DataFrame."""
     import io
-    return pd.read_excel(io.BytesIO(content), engine="openpyxl")
+    engine = "xlrd" if ext == ".xls" else "openpyxl"
+    try:
+        return pd.read_excel(io.BytesIO(content), engine=engine)
+    except ImportError as exc:
+        if ext == ".xls":
+            raise HTTPException(
+                status_code=500,
+                detail="Thiếu dependency 'xlrd' để đọc file .xls. Chạy: pip install xlrd>=2.0.1 hoặc chuyển file sang .xlsx.",
+            ) from exc
+        raise HTTPException(
+            status_code=500,
+            detail="Thiếu dependency parser cho Excel. Kiểm tra cài đặt backend dependencies.",
+        ) from exc
 
 
 def _parse_csv(content: bytes) -> pd.DataFrame:
@@ -196,7 +208,7 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
     if len(files) > MAX_FILES_PER_UPLOAD:
         raise HTTPException(
             status_code=422,
-            detail=f"Maximum {MAX_FILES_PER_UPLOAD} files per upload. Got {len(files)}.",
+            detail=f"Tối đa {MAX_FILES_PER_UPLOAD} file mỗi lần upload. Bạn đã chọn {len(files)} file.",
         )
 
     # 1. Read all files and validate extensions + sizes
@@ -206,11 +218,11 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
         filename = f.filename or "unknown"
         ext = _get_extension(filename)
 
-        # Extension check
+        # Extension check — only .xlsx, .xls, .csv, .docx, .pptx, .pdf
         if ext not in ALLOWED_ALL:
             raise HTTPException(
                 status_code=415,
-                detail=f"Unsupported file type '{ext}'. Allowed: .xlsx, .csv, .docx, .pptx",
+                detail=f"Định dạng '{ext}' không hỗ trợ. Chỉ chấp nhận: .xlsx, .xls, .csv (bảng điểm) · .docx, .pptx, .pdf (CV, chứng chỉ)",
             )
 
         content = await f.read()
@@ -229,13 +241,28 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
     if len(primary_files) == 0:
         raise HTTPException(
             status_code=422,
-            detail="No primary data file (.xlsx or .csv) provided. At least one is required.",
+            detail="Không tìm thấy file dữ liệu (.xlsx, .xls hoặc .csv). Vui lòng upload ít nhất một file bảng điểm.",
         )
 
     # 3. Parse the first primary file as the main dataset
     primary_fn, primary_ext, primary_content = primary_files[0]
-    if primary_ext == ".xlsx":
-        df = _parse_excel(primary_content)
+    if primary_ext in (".xlsx", ".xls"):
+        try:
+            df = _parse_excel(primary_content, primary_ext)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            # Common client-side issue: real .xlsx content saved with ".xls" name.
+            if primary_ext == ".xls" and primary_content[:4] == b"PK\x03\x04":
+                df = _parse_excel(primary_content, ".xlsx")
+            else:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"File '{primary_fn}' không đúng định dạng Excel hợp lệ hoặc đã hỏng. "
+                        "Hãy mở file và lưu lại thành .xlsx rồi upload lại."
+                    ),
+                ) from exc
     else:
         df = _parse_csv(primary_content)
 
@@ -279,7 +306,21 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
     if clerk_user_id and r2.is_available():
         r2_key = r2.make_dataset_key(clerk_user_id, file_id, primary_ext)
 
-    # 7. Store entry in-memory (cache)
+    # 7. Parse secondary Excel/CSV files and store them
+    secondary_dataframes: dict[str, pd.DataFrame] = {}
+    for fn, ext, data in primary_files[1:]:  # skip the first (primary) file
+        try:
+            if ext in (".xlsx", ".xls"):
+                sec_df = _parse_excel(data, ext)
+            else:
+                sec_df = _parse_csv(data)
+            sec_df.columns = sec_df.columns.str.strip()
+            secondary_dataframes[fn] = sec_df
+            logger.info("Parsed secondary file '%s' (%d rows)", fn, len(sec_df))
+        except Exception as exc:
+            logger.warning("Could not parse secondary file '%s': %s", fn, exc)
+
+    # 8. Store entry in-memory (cache)
     entry = FileEntry(
         file_id=file_id,
         dataframe=df,
@@ -291,12 +332,17 @@ async def upload(request: Request, files: list[UploadFile] = File(...)) -> Uploa
         content_hash=content_hash,
         file_name=primary_fn,
         file_type=primary_ext,
+        secondary_dataframes=secondary_dataframes,
     )
     await set_entry(entry)
 
     # 8. Async persistence — fire-and-forget (non-blocking)
     if r2_key and r2.is_available():
-        content_type = "text/csv" if primary_ext == ".csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        content_type = {
+            ".csv": "text/csv",
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".xls": "application/vnd.ms-excel",
+        }.get(primary_ext, "application/octet-stream")
         asyncio.create_task(_persist_to_r2(r2_key, primary_content, content_type))
 
     if clerk_user_id and r2_key and supa.is_available():

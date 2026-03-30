@@ -7,11 +7,14 @@ import { uploadFile } from "@/lib/api";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 
+const MAX_FILES = 3;
+
+// Only Excel + CSV — no docx/pptx context files from frontend dropzone
 const ACCEPTED_TYPES: Record<string, string[]> = {
-  "text/csv": [".csv"],
+  "application/vnd.ms-excel": [".xls"],
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation": [".pptx"],
+  "text/csv": [".csv"],
+  "application/csv": [".csv"],
 };
 
 /**
@@ -23,7 +26,7 @@ function parseLocally(
   buffer: ArrayBuffer,
 ): { columns: string[]; rows: Record<string, unknown>[] } | null {
   const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
-  if (ext !== ".xlsx" && ext !== ".csv") return null; // only parse data files
+  if (ext !== ".xlsx" && ext !== ".xls" && ext !== ".csv") return null;
 
   try {
     const workbook = XLSX.read(buffer, { type: "array" });
@@ -36,7 +39,7 @@ function parseLocally(
     const columns = jsonData.length > 0 ? Object.keys(jsonData[0]) : [];
     return { columns, rows: jsonData };
   } catch {
-    return null; // parsing failure is non-fatal — server will handle it
+    return null;
   }
 }
 
@@ -50,13 +53,12 @@ export function UploadZone() {
 
       setIsUploading(true);
 
-      // ─── Strategy 2: Parse locally with SheetJS (instant) ────────
+      // Parse locally with SheetJS for instant Data Viewer rendering
       const primaryFile = acceptedFiles[0];
       const buffer = await primaryFile.arrayBuffer();
       const localData = parseLocally(primaryFile, buffer);
 
       try {
-        // Upload to backend (for AI analysis + R2 persistence)
         const result = await uploadFile(acceptedFiles, user?.id);
 
         setUploadState({
@@ -66,7 +68,7 @@ export function UploadZone() {
           columns: [...result.columns],
         });
 
-        // Register file in uploadedFiles for Data Viewer tabs
+        // Register file in uploadedFiles for Data Viewer tabs AND upload history
         const ext = primaryFile.name.slice(primaryFile.name.lastIndexOf(".")).toLowerCase();
         addUploadedFile({
           id: result.file_id,
@@ -76,6 +78,7 @@ export function UploadZone() {
           uploaded_at: new Date().toISOString(),
           columns: [...result.columns],
           row_count: result.row_count,
+          file_size: primaryFile.size,
         });
 
         // Store locally-parsed data for instant Data Viewer rendering
@@ -83,9 +86,9 @@ export function UploadZone() {
           setLocalParsedData(result.file_id, localData);
         }
 
-        toast.success("Dataset uploaded successfully!");
+        toast.success(`Đã upload "${primaryFile.name}" thành công!`);
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Upload failed";
+        const message = err instanceof Error ? err.message : "Upload thất bại";
         toast.error(message);
       } finally {
         setIsUploading(false);
@@ -97,15 +100,18 @@ export function UploadZone() {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: ACCEPTED_TYPES,
-    maxSize: 20 * 1024 * 1024, // 20 MB (per PRD v0.4)
+    maxFiles: MAX_FILES,
+    maxSize: 20 * 1024 * 1024, // 20 MB
     onDropRejected: (rejections) => {
       const firstError = rejections[0]?.errors[0];
       if (firstError?.code === "file-too-large") {
-        toast.error("File exceeds the 20 MB limit.");
+        toast.error("File vượt quá giới hạn 20 MB.");
       } else if (firstError?.code === "file-invalid-type") {
-        toast.error("Unsupported file type. Allowed: .xlsx, .csv, .docx, .pptx");
+        toast.error("Định dạng không hỗ trợ. Chỉ chấp nhận .xlsx, .xls, .csv");
+      } else if (firstError?.code === "too-many-files") {
+        toast.error(`Tối đa ${MAX_FILES} file mỗi lần upload.`);
       } else {
-        toast.error(firstError?.message ?? "File rejected");
+        toast.error(firstError?.message ?? "File bị từ chối");
       }
     },
   });
@@ -123,15 +129,27 @@ export function UploadZone() {
       >
         <input {...getInputProps()} />
 
-        <div className="text-5xl">📁</div>
+        <div className="text-5xl">{isDragActive ? "📥" : "📊"}</div>
 
         <div>
           <p className="font-semibold text-[#2D3561] text-lg mb-1">
-            {isDragActive ? "Drop your file here" : "Drag & drop your dataset"}
+            {isDragActive ? "Thả file vào đây..." : "Kéo thả file bảng điểm vào đây"}
           </p>
           <p className="text-gray-400 text-sm">
-            or click to browse · .xlsx, .csv, .docx, .pptx · Max 20 MB
+            hoặc click để chọn · Tối đa {MAX_FILES} file · 20 MB mỗi file
           </p>
+        </div>
+
+        {/* Format badges */}
+        <div className="flex gap-2">
+          {[".xlsx", ".xls", ".csv"].map((fmt) => (
+            <span
+              key={fmt}
+              className="px-2.5 py-1 rounded-lg bg-gray-100 text-xs font-medium text-gray-600 border border-gray-200"
+            >
+              {fmt}
+            </span>
+          ))}
         </div>
       </div>
     </div>

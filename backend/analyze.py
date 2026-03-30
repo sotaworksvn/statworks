@@ -23,7 +23,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
+import unicodedata
+from typing import Union
+
 
 from fastapi import APIRouter, HTTPException
 
@@ -37,6 +41,7 @@ from backend.models import (
     AnalyzeResponse,
     DecisionTrace,
     DriverResult,
+    StudentProfileResponse,
 )
 from backend.router import score_model
 from backend.store import get_entry, set_entry
@@ -47,8 +52,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/analyze", response_model=AnalyzeResponse)
-async def analyze(body: AnalyzeRequest) -> AnalyzeResponse:
+@router.post("/analyze", response_model=Union[StudentProfileResponse, AnalyzeResponse])
+async def analyze(body: AnalyzeRequest) -> Union[StudentProfileResponse, AnalyzeResponse]:
     """Full AI-powered driver analysis endpoint."""
 
     try:
@@ -96,6 +101,24 @@ async def analyze(body: AnalyzeRequest) -> AnalyzeResponse:
                 return _dispatch_direct(method_key, df, target)
 
         # ---------------------------------------------------------------
+        # Step 2a.1: GPA target planning (deterministic, no regression)
+        # ---------------------------------------------------------------
+        if _is_gpa_goal_query(body.query):
+            elapsed = time.perf_counter() - t_start
+            logger.info("/analyze GPA goal dispatch in %.3fs", elapsed)
+            return _handle_gpa_goal(df, body.query)
+
+        # ---------------------------------------------------------------
+        # Step 2a.2: Student profile analysis (deterministic bypass)
+        #   Triggered when user asks about scholarships/opportunities AND
+        #   the dataset looks like student academic data (THPT/GPA/CV context).
+        # ---------------------------------------------------------------
+        if _is_student_profile_query(body.query, entry):
+            elapsed = time.perf_counter() - t_start
+            logger.info("/analyze student_profile_analysis dispatch in %.3fs", elapsed)
+            return await _handle_student_profile_analysis(entry, df, column_names, body.query)
+
+        # ---------------------------------------------------------------
         # Step 2b: LLM Call 1 — intent parsing (gpt-5.4-mini)
         #          On failure → Layer 1 fallback (auto-select features)
         # ---------------------------------------------------------------
@@ -136,6 +159,18 @@ async def analyze(body: AnalyzeRequest) -> AnalyzeResponse:
                 not_supported=True,
                 suggestion=reason,
             )
+
+        # ── student_profile_analysis: 6-section comprehensive pipeline ──
+        if intent in (
+            "student_profile_analysis", "student_profile",
+            "scholarship_analysis", "profile_analysis",
+            "analyze_profile", "opportunity_analysis",
+        ):
+            return await _handle_student_profile_analysis(entry, df, column_names, body.query)
+
+        # ── scholarship_prediction: EdTech track ──
+        if intent in ("scholarship_prediction", "scholarship", "predict_scholarship", "school_matching"):
+            return await _handle_scholarship_prediction(entry, df, column_names)
 
         # ── data_edit: modify dataset values ──
         if intent == "data_edit":
@@ -294,10 +329,375 @@ async def analyze(body: AnalyzeRequest) -> AnalyzeResponse:
         raise
     except Exception as exc:
         logger.exception("Unexpected error in /analyze")
-        raise HTTPException(
-            status_code=500,
-            detail="Unexpected error. Please try again.",
-        ) from exc
+        return AnalyzeResponse(
+            summary="Hệ thống gặp lỗi nội bộ khi xử lý yêu cầu.",
+            drivers=[],
+            r2=None,
+            recommendation="Vui lòng thử lại. Nếu lỗi lặp lại, hãy hỏi theo mẫu: 'Mục tiêu GPA 8.0, mỗi môn chưa có điểm cần bao nhiêu?'",
+            model_type=None,
+            decision_trace=DecisionTrace(
+                score_pls=0.0,
+                score_reg=0.0,
+                engine_selected=None,
+                reason="Unexpected error fallback",
+            ),
+            result_type="general",
+        )
+
+
+def _is_gpa_goal_query(query: str) -> bool:
+    q = _normalize_text(query)
+    has_goal = any(k in q for k in ("gpa", "diem trung binh", "grade point average"))
+    has_requirement = any(
+        k in q
+        for k in (
+            "bao nhieu",
+            "it nhat",
+            "at least",
+            "can",
+            "need",
+            "required",
+        )
+    )
+    has_pending = any(
+        k in q
+        for k in (
+            "chua co diem",
+            "pending",
+            "not started",
+            "studying",
+            "moi mon",
+            "each subject",
+        )
+    )
+    return has_goal and (has_requirement or has_pending)
+
+
+
+def _is_student_profile_query(query: str, entry: "FileEntry") -> bool:
+    """Detect student scholarship/profile analysis requests.
+
+    Returns True when:
+    1. The query contains scholarship/profile analysis keywords, AND
+    2. The dataset context looks like student academic data (THPT/GPA/certificate files).
+    """
+    from backend.store import FileEntry  # type: ignore[attr-defined]
+
+    q = _normalize_text(query)
+
+    # Query-side keywords (Vietnamese + English)
+    scholarship_kws = [
+        "hoc bong", "co hoi", "phan tich ho so", "profile", "apply dau",
+        "truong nao", "vao dau", "chon truong", "co the dat", "co the nop",
+        "recommendation", "lo trinh", "roadmap", "scholarship", "opportunity",
+        "admission", "university matching", "truong phu hop", "phu hop voi",
+        "ho so cua toi", "nang luc", "phan tich nang luc",
+        "toi co the", "kha nang dat", "xet hoc bong", "hoc bong phu hop",
+    ]
+    query_match = any(kw in q for kw in scholarship_kws)
+
+    if not query_match:
+        return False
+
+    # Context-side signals: does this look like student data?
+    # entry is a FileEntry object — use attribute access, not .get()
+    context = getattr(entry, "context_text", "") or ""
+    filename = getattr(entry, "file_name", "") or ""
+
+    student_data_signals = [
+        "thpt", "bang diem", "chung chi", "hoat dong",
+        "gpa", "toefl", "ielts", "sat", "diem so",
+        "mon hoc", "hoc ky", "hoc sinh",
+        "nguyen van an", "ho so",
+    ]
+
+    context_lower = _normalize_text(context + " " + filename)
+    context_match = any(sig in context_lower for sig in student_data_signals)
+
+    return context_match
+
+
+def _extract_gpa_target(query: str) -> float | None:
+    q = _normalize_text(query)
+    # Prefer values near cues like "gpa", "lên/to", "target"
+    patterns = [
+        r"(?:gpa|target|muc tieu|len|to)\D{0,8}(\d{1,2}(?:[.,]\d{1,2})?)",
+        r"(\d{1,2}(?:[.,]\d{1,2})?)\D{0,8}(?:gpa)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, q, flags=re.IGNORECASE)
+        if m:
+            try:
+                return float(m.group(1).replace(",", "."))
+            except ValueError:
+                pass
+    return None
+
+
+def _gpa_query_prefers_each_subject(query: str) -> bool:
+    q = _normalize_text(query)
+    return any(
+        k in q
+        for k in (
+            "moi mon",
+            "tung mon",
+            "tung hoc phan",
+            "each subject",
+            "every subject",
+            "per subject",
+        )
+    )
+
+
+def _gpa_query_prefers_average(query: str) -> bool:
+    q = _normalize_text(query)
+    return any(
+        k in q
+        for k in (
+            "trung binh",
+            "average",
+            "avg",
+        )
+    )
+
+
+def _normalize_text(text: str | None) -> str:
+    if not text:
+        return ""
+    s = unicodedata.normalize("NFD", text)
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+    return s.lower()
+
+
+def _find_first_column(columns: list[str], candidates: list[str]) -> str | None:
+    by_lower = {c.lower(): c for c in columns}
+    for cand in candidates:
+        if cand in by_lower:
+            return by_lower[cand]
+    for col in columns:
+        low = col.lower()
+        if any(cand in low for cand in candidates):
+            return col
+    return None
+
+
+def _handle_gpa_goal(df: "pd.DataFrame", query: str) -> AnalyzeResponse:
+    """Estimate required grade per pending subject to hit a GPA target."""
+    import pandas as pd
+
+    _no_trace = DecisionTrace(
+        score_pls=0.0, score_reg=0.0, engine_selected=None, reason="Intent: gpa_goal_planning",
+    )
+    prefers_each_subject = _gpa_query_prefers_each_subject(query)
+    prefers_average = _gpa_query_prefers_average(query)
+
+    columns = df.columns.tolist()
+    grade_col = _find_first_column(
+        columns,
+        ["grade", "điểm", "diem", "score", "mark"],
+    )
+    credit_col = _find_first_column(
+        columns,
+        ["credit", "tín chỉ", "tin chi", "units", "ects"],
+    )
+    status_col = _find_first_column(
+        columns,
+        ["status", "trạng thái", "trang thai"],
+    )
+    subject_col = _find_first_column(
+        columns,
+        ["subject name", "course", "môn", "mon", "subject"],
+    )
+
+    if not grade_col or not credit_col:
+        return AnalyzeResponse(
+            summary="Không tìm thấy đủ cột để tính GPA mục tiêu (cần cột điểm và tín chỉ).",
+            drivers=[], r2=None,
+            recommendation="Hãy đảm bảo file có cột tương đương 'Grade' và 'Credit'.",
+            model_type=None, decision_trace=_no_trace,
+            result_type="general",
+        )
+
+    grades = pd.to_numeric(df[grade_col], errors="coerce")
+    credits = pd.to_numeric(df[credit_col], errors="coerce")
+
+    known_mask = grades.notna() & credits.notna() & (credits > 0)
+    if int(known_mask.sum()) == 0:
+        return AnalyzeResponse(
+            summary="Chưa có đủ môn đã có điểm + tín chỉ để tính GPA hiện tại.",
+            drivers=[], r2=None,
+            recommendation="Cần ít nhất một môn có đủ Grade và Credit > 0.",
+            model_type=None, decision_trace=_no_trace,
+            result_type="general",
+        )
+
+    known_points = float((grades[known_mask] * credits[known_mask]).sum())
+    known_credits = float(credits[known_mask].sum())
+    current_gpa = known_points / known_credits if known_credits > 0 else 0.0
+
+    target = _extract_gpa_target(query)
+    if target is None:
+        target = min(current_gpa + 0.5, 10.0)
+
+    # Detect grade scale from existing data
+    grade_scale_max = 10.0
+    max_seen = float(grades[known_mask].max()) if int(known_mask.sum()) else 10.0
+    if max_seen <= 4.5 and target <= 4.5:
+        grade_scale_max = 4.0
+
+    if target > grade_scale_max:
+        return AnalyzeResponse(
+            summary=f"Mục tiêu GPA {target:.2f} vượt thang điểm hiện tại (0-{grade_scale_max:.1f}).",
+            drivers=[], r2=None,
+            recommendation=f"Hãy nhập mục tiêu trong khoảng 0-{grade_scale_max:.1f}.",
+            model_type=None, decision_trace=_no_trace,
+            result_type="general",
+        )
+
+    pending_mask = grades.isna()
+    if status_col:
+        status_txt = df[status_col].astype(str).str.lower()
+        done_status = status_txt.str.contains(
+            r"passed|completed|done|đạt|dat",
+            na=False,
+            regex=True,
+        )
+        pending_status = status_txt.str.contains(
+            r"studying|not started|in progress|register|pending|chưa|dang hoc",
+            na=False,
+            regex=True,
+        )
+        pending_mask = (pending_mask & ~done_status) | pending_status
+
+    if subject_col:
+        pending_mask = pending_mask & df[subject_col].notna()
+
+    pending_df = df[pending_mask].copy()
+    pending_count = len(pending_df)
+    if pending_count == 0:
+        if current_gpa >= target:
+            summary = f"GPA hiện tại khoảng {current_gpa:.2f}, đã đạt mục tiêu {target:.2f}."
+            rec = "Bạn không cần thêm điểm để đạt mục tiêu này."
+        else:
+            summary = f"Không còn môn chờ điểm nhưng GPA hiện tại ({current_gpa:.2f}) chưa đạt mục tiêu {target:.2f}."
+            rec = "Bạn cần học cải thiện hoặc đăng ký thêm môn có điểm cao."
+        return AnalyzeResponse(
+            summary=summary,
+            drivers=[], r2=None,
+            recommendation=rec,
+            model_type=None, decision_trace=_no_trace,
+            result_type="general",
+        )
+
+    pending_credits = pd.to_numeric(pending_df[credit_col], errors="coerce")
+    known_pending_credits = float(pending_credits.fillna(0).clip(lower=0).sum())
+    missing_credit_count = int((pending_credits.isna() | (pending_credits <= 0)).sum())
+
+    def _required_avg(extra_credits: float) -> float:
+        return ((target * (known_credits + extra_credits)) - known_points) / extra_credits
+
+    # Case A: exact computation (all pending credits known)
+    if known_pending_credits > 0 and missing_credit_count == 0:
+        req = _required_avg(known_pending_credits)
+
+        if req <= 0:
+            summary = (
+                f"GPA hiện tại {current_gpa:.2f}. Với {pending_count} môn chưa có điểm "
+                f"(tổng {known_pending_credits:.1f} tín chỉ), bạn đã ở mức đạt mục tiêu {target:.2f}."
+            )
+            recommendation = "Giữ điểm các môn còn lại ổn định để duy trì GPA mục tiêu."
+        elif req > grade_scale_max:
+            summary = (
+                f"Để đạt GPA {target:.2f}, điểm trung bình cần cho các môn còn lại là {req:.2f}/{grade_scale_max:.1f}, "
+                "vượt thang điểm nên không khả thi theo dữ liệu hiện tại."
+            )
+            recommendation = "Giảm mục tiêu GPA hoặc tăng số tín chỉ môn mới có thể đạt điểm cao."
+        else:
+            req_phrase = (
+                f"mỗi môn chưa có điểm cần tối thiểu khoảng {req:.2f}/{grade_scale_max:.1f}"
+                if prefers_each_subject and not prefers_average
+                else f"điểm trung bình các môn còn lại cần khoảng {req:.2f}/{grade_scale_max:.1f}"
+            )
+            summary = (
+                f"GPA hiện tại {current_gpa:.2f}. Để lên {target:.2f}, "
+                f"{req_phrase}."
+            )
+            recommendation = (
+                f"Tập trung giữ các môn pending từ {req:.2f} trở lên, ưu tiên môn nhiều tín chỉ trước."
+            )
+
+        return AnalyzeResponse(
+            summary=summary,
+            drivers=[], r2=None,
+            recommendation=recommendation,
+            model_type=None, decision_trace=_no_trace,
+            result_type="general",
+        )
+
+    # Case B: estimate when some pending credits are missing
+    known_credit_values = pd.to_numeric(df[credit_col], errors="coerce")
+    known_credit_values = known_credit_values[(known_credit_values > 0) & known_credit_values.notna()]
+    avg_credit = float(known_credit_values.median()) if len(known_credit_values) else 3.0
+    if avg_credit <= 0:
+        avg_credit = 3.0
+
+    estimated_pending_credits = known_pending_credits + (missing_credit_count * avg_credit)
+    req_est = _required_avg(estimated_pending_credits) if estimated_pending_credits > 0 else float("inf")
+
+    if req_est <= 0:
+        summary = (
+            f"GPA hiện tại {current_gpa:.2f}. Với dữ liệu hiện có, bạn đã đạt hoặc vượt mục tiêu {target:.2f} "
+            "nên không cần mức điểm tối thiểu dương cho các môn còn lại."
+        )
+        recommendation = (
+            "Bạn chỉ cần giữ điểm các môn còn lại ở mức ổn định để duy trì GPA mục tiêu. "
+            "Nếu muốn hệ thống dự báo chính xác hơn, hãy bổ sung Credit cho các môn chưa có điểm."
+        )
+        return AnalyzeResponse(
+            summary=summary,
+            drivers=[], r2=None,
+            recommendation=recommendation,
+            model_type=None, decision_trace=_no_trace,
+            result_type="general",
+        )
+
+    scenario_lines = []
+    for credit_assumption in (2.0, 3.0, 4.0):
+        est_credits = known_pending_credits + (missing_credit_count * credit_assumption)
+        if est_credits <= 0:
+            continue
+        req_s = _required_avg(est_credits)
+        if req_s <= 0:
+            scenario_lines.append(f"~{credit_assumption:.0f} tín chỉ/môn => đã đạt mục tiêu")
+        elif req_s > grade_scale_max:
+            scenario_lines.append(
+                f"~{credit_assumption:.0f} tín chỉ/môn => cần {req_s:.2f}/{grade_scale_max:.1f} (khó khả thi)"
+            )
+        else:
+            scenario_lines.append(f"~{credit_assumption:.0f} tín chỉ/môn => cần khoảng {req_s:.2f}")
+
+    req_est_phrase = (
+        f"mỗi môn cần tối thiểu khoảng {req_est:.2f}/{grade_scale_max:.1f}"
+        if prefers_each_subject and not prefers_average
+        else f"điểm trung bình cần khoảng {req_est:.2f}/{grade_scale_max:.1f}"
+    )
+    summary = (
+        f"GPA hiện tại {current_gpa:.2f}. Có {pending_count} môn chưa có điểm nhưng thiếu dữ liệu tín chỉ "
+        f"ở {missing_credit_count} môn nên chưa thể tính chính xác. "
+        f"Ước tính nếu mỗi môn pending ~{avg_credit:.1f} tín chỉ thì {req_est_phrase}."
+    )
+    recommendation = (
+        "Bổ sung Credit cho các môn chưa có điểm để hệ thống tính chính xác. "
+        + (" | ".join(scenario_lines) if scenario_lines else "")
+    )
+
+    return AnalyzeResponse(
+        summary=summary,
+        drivers=[], r2=None,
+        recommendation=recommendation,
+        model_type=None, decision_trace=_no_trace,
+        result_type="general",
+    )
 
 
 async def _persist_analysis_result(file_id: str, result_dict: dict) -> None:
@@ -994,7 +1394,12 @@ async def _handle_general_question(
     cleaned: "CleanedIntent",
     query: str,
 ) -> AnalyzeResponse:
-    """Handle general questions by using LLM to answer from data context."""
+    """Handle general questions by using LLM to answer from data context.
+
+    If the question requires real-world knowledge (e.g. university admissions,
+    scholarships), uses web_search_answer() for live, grounded results.
+    Otherwise falls back to LLM with data context only.
+    """
     import json
 
     _no_trace = DecisionTrace(
@@ -1002,7 +1407,49 @@ async def _handle_general_question(
         reason="Intent: general_question",
     )
 
-    # Build data summary for LLM
+    # ── Check if this query needs live web data ──
+    from backend.llm.web_search import _requires_web_search, web_search_answer
+
+    if _requires_web_search(query):
+        # Build a concise profile from the dataset for personalization
+        numeric_cols = df.select_dtypes("number").columns.tolist()
+        profile_parts: list[str] = [f"Dataset: {len(df)} rows, {len(df.columns)} columns"]
+
+        if numeric_cols:
+            try:
+                summary_stats = df[numeric_cols].describe().round(2)
+                # Compact version: just means
+                means = {col: round(float(df[col].dropna().mean()), 2) for col in numeric_cols[:8]}
+                profile_parts.append(
+                    "Column averages: " + ", ".join(f"{k}={v}" for k, v in means.items())
+                )
+            except Exception:
+                pass
+
+        dataset_context = "\n".join(profile_parts)
+
+        try:
+            result = await web_search_answer(query=query, context=dataset_context)
+
+            if result is not None:
+                formatted_answer = result.format_with_citations()
+                return AnalyzeResponse(
+                    summary=formatted_answer,
+                    drivers=[], r2=None,
+                    recommendation=(
+                        "Kết quả trên được tổng hợp từ dữ liệu web thực tế. "
+                        "Hãy xác nhận thêm với trang chính thức của trường."
+                        if any(c > 127 for c in map(ord, query))
+                        else "Results sourced from live web data. Verify with official university websites for the most current requirements."
+                    ),
+                    model_type=None, decision_trace=_no_trace,
+                    result_type="general",
+                    table_data={"web_search_result": True, "citations": result.citations},
+                )
+        except Exception as ws_exc:
+            logger.warning("Web search failed, falling back to data-context LLM: %s", ws_exc)
+
+    # ── Data-context fallback (no web search needed or web search failed) ──
     numeric_cols = df.select_dtypes("number").columns.tolist()
     data_summary_parts = [
         f"Dataset: {len(df)} rows, {len(df.columns)} columns",
@@ -1054,4 +1501,246 @@ async def _handle_general_question(
             recommendation="Try asking 'What drives [variable]?' for statistical analysis.",
             model_type=None, decision_trace=_no_trace,
             result_type="general",
+        )
+
+
+
+# ---------------------------------------------------------------------------
+# Scholarship Prediction Handler (EdTech Track)
+# ---------------------------------------------------------------------------
+
+async def _handle_scholarship_prediction(entry: object, df, column_names: list) -> "AnalyzeResponse":
+    """Handle scholarship prediction flow.
+
+    1. Extract student profile from uploaded files
+    2. Score against school database
+    3. Return ranked matches with dream/target/safety classification
+    """
+    from backend.context.extractor import extract_student_profile
+    from backend.scholarship.engine import predict_scholarship_with_live_data
+
+    try:
+        # Extract profile
+        context_text = getattr(entry, "context_text", None)
+        profile = extract_student_profile(df, context_text, column_names)
+
+        # Predict matches — uses live LLM-recalled data when available
+        matches = await predict_scholarship_with_live_data(profile, use_live=True)
+
+        # Count by level
+        n_dream = sum(1 for m in matches if m["match_level"] == "dream")
+        n_target = sum(1 for m in matches if m["match_level"] == "target")
+        n_safety = sum(1 for m in matches if m["match_level"] == "safety")
+
+        # Build summary
+        profile_desc = []
+        if profile.get("gpa"):
+            profile_desc.append(f"GPA {profile['gpa']}")
+        if profile.get("sat_score"):
+            profile_desc.append(f"SAT {profile['sat_score']}")
+        if profile.get("ielts_score"):
+            profile_desc.append(f"IELTS {profile['ielts_score']}")
+
+        profile_str = ", ".join(profile_desc) or "hồ sơ của bạn"
+        summary = (
+            f"Dựa trên {profile_str}, AI đã tìm thấy {len(matches)} trường phù hợp: "
+            f"{n_dream} trường Mơ ước, {n_target} trường Phù hợp, {n_safety} trường An toàn."
+        )
+
+        recommendation = (
+            f"Chiến lược đề xuất: Nộp đơn 2-3 trường Mơ ước, 5-7 trường Phù hợp, và 2-3 trường An toàn. "
+            f"Sử dụng tính năng Mô Phỏng để xem cơ hội tăng lên khi cải thiện điểm SAT hoặc GPA."
+        )
+
+        # Format as SchoolMatch list
+        school_matches = [
+            {
+                "school_name": m["school_name"],
+                "country": m["country"],
+                "match_score": m["match_score"],
+                "match_level": m["match_level"],
+                "strengths": m["strengths"],
+                "weaknesses": m["weaknesses"],
+            }
+            for m in matches
+        ]
+
+        return AnalyzeResponse(
+            summary=summary,
+            drivers=[], r2=None,
+            recommendation=recommendation,
+            model_type="scholarship_pls",
+            decision_trace=DecisionTrace(
+                score_pls=0.0, score_reg=0.0,
+                engine_selected="scholarship_pls",
+                reason="EdTech: Student profile matched against school database",
+            ),
+            result_type="scholarship_prediction",
+            school_matches=school_matches,
+            student_profile=profile,
+        )
+
+    except Exception as exc:
+        logger.error("Scholarship prediction failed: %s", exc, exc_info=True)
+        return AnalyzeResponse(
+            summary="Không thể dự đoán học bổng. Hãy upload bảng điểm hoặc CV chứa thông tin GPA, SAT, IELTS.",
+            drivers=[], r2=None,
+            recommendation="Vui lòng upload file có chứa thông tin: GPA, SAT score, IELTS/TOEFL score.",
+            model_type=None,
+            decision_trace=DecisionTrace(
+                score_pls=0.0, score_reg=0.0, engine_selected=None,
+                reason=f"Scholarship prediction error: {exc}",
+            ),
+            result_type="scholarship_prediction",
+            not_supported=True,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Student Profile Analysis Handler — 6-section comprehensive pipeline
+# ---------------------------------------------------------------------------
+
+async def _handle_student_profile_analysis(
+    entry: dict,
+    df: "pd.DataFrame",
+    column_names: list[str],
+    query: str,
+) -> "StudentProfileResponse":
+    """6-section student profile analysis pipeline.
+
+    Sections:
+    1. Insight về năng lực (SPSS analysis)
+    2. Insight về cơ hội (web scholarship search)
+    3. Visual: capability table/chart data
+    4. Visual: scholarship opportunities table
+    5. Recommendation roadmap
+    6. Simulation criteria config
+    """
+    from backend.student.profile_extractor import extract_student_profile_full
+    from backend.student.analyzer import analyze_student_capability
+    from backend.student.scholarship_searcher import (
+        search_scholarship_opportunities,
+        build_simulate_criteria,
+    )
+    from backend.student.roadmap import generate_roadmap
+
+    _trace = DecisionTrace(
+        score_pls=0.0, score_reg=0.0, engine_selected="StudentProfilePipeline",
+        reason="Intent: student_profile_analysis — 6-section pipeline",
+    )
+
+    try:
+        # ── Step 1: Get all uploaded file DataFrames from the store entry ──
+        # entry is a FileEntry object with .dataframe, .file_name, .context_text
+        dfs: dict[str, "pd.DataFrame"] = {}
+
+        # Primary df from the analyzed entry (FileEntry.dataframe)
+        primary_filename = getattr(entry, "file_name", None) or "primary.xlsx"
+        dfs[primary_filename] = df  # df is already entry.dataframe from the caller
+
+        # Add any secondary files uploaded alongside the primary (multi-file upload)
+        secondary = getattr(entry, "secondary_dataframes", {}) or {}
+        for sec_fn, sec_df in secondary.items():
+            dfs[sec_fn] = sec_df
+            logger.info("Added secondary file '%s' (%d rows) to profile extraction", sec_fn, len(sec_df))
+
+        logger.info(
+            "student_profile_analysis: Processing %d files: %s",
+            len(dfs), list(dfs.keys()),
+        )
+
+        # ── Step 2: Extract unified student profile ──
+        profile = extract_student_profile_full(dfs)
+        logger.info(
+            "Profile extracted: %s, GPA %s, tier %s",
+            profile.get("name"), profile.get("gpa_10"), profile.get("overall_tier"),
+        )
+
+        # ── Step 3: SPSS-equivalent capability analysis ──
+        capability = analyze_student_capability(profile)
+
+        # ── Step 4: Web search for scholarship opportunities ──
+        try:
+            opportunities = await search_scholarship_opportunities(profile, capability)
+        except Exception as exc:
+            logger.warning("Scholarship search failed, using empty: %s", exc)
+            opportunities = []
+
+        # ── Step 5: Generate personalized roadmap ──
+        try:
+            roadmap = await generate_roadmap(profile, capability, opportunities)
+        except Exception as exc:
+            logger.warning("Roadmap generation failed: %s", exc)
+            roadmap = []
+
+        # ── Step 6: Build simulation criteria ──
+        simulate_criteria = build_simulate_criteria(profile, opportunities)
+
+        # ── Assemble the summary ──
+        name = profile.get("name", "Học sinh")
+        tier = profile.get("overall_tier", "")
+        gpa_10 = profile.get("gpa_10", "?")
+        n_opp = len(opportunities)
+        key_insights = capability.get("key_insights", [])
+
+        summary = (
+            f"**{name}** — {tier}\n\n"
+            + "\n".join(f"• {ins}" for ins in key_insights[:4])
+        )
+
+        # Recommendation: top roadmap milestone as teaser
+        if roadmap:
+            first_milestone = roadmap[0]
+            top_actions = first_milestone.get("milestones", [])[:2]
+            recommendation = (
+                f"🗓 **{first_milestone.get('month', '')}**: "
+                + " → ".join(top_actions)
+            )
+        else:
+            recommendation = (
+                f"Phân tích hoàn thành. Tìm thấy {n_opp} cơ hội học bổng phù hợp với profile {tier}."
+            )
+
+        return StudentProfileResponse(
+            summary=summary,
+            drivers=[], r2=None,
+            recommendation=recommendation,
+            model_type=None,
+            decision_trace=_trace,
+            result_type="student_profile_analysis",
+            # 6 sections
+            capability_analysis=capability,
+            scholarship_opportunities=opportunities,
+            roadmap=roadmap,
+            simulate_criteria=simulate_criteria,
+            student_profile_full=profile,
+            student_tier=tier,
+            # Legacy fields for backward compat
+            student_profile={
+                "name": name,
+                "gpa": gpa_10,
+                "gpa_4": profile.get("gpa_4"),
+                "sat_score": profile.get("sat"),
+                "ielts_score": profile.get("ielts"),
+                "toefl_score": profile.get("toefl"),
+                "major": profile.get("target_major"),
+                "country": profile.get("target_country"),
+                "tier": tier,
+            },
+            school_matches=[],
+        )
+
+    except Exception as exc:
+        logger.error("Student profile analysis failed: %s", exc, exc_info=True)
+        return StudentProfileResponse(
+            summary=f"Phân tích hồ sơ thất bại: {exc}",
+            drivers=[], r2=None,
+            recommendation="Vui lòng đảm bảo upload đủ 3 file: bảng điểm GPA, hoạt động ngoại khóa, và chứng chỉ.",
+            model_type=None,
+            decision_trace=DecisionTrace(
+                score_pls=0.0, score_reg=0.0, engine_selected=None,
+                reason=f"Student profile error: {exc}",
+            ),
+            result_type="student_profile_analysis",
+            not_supported=True,
         )

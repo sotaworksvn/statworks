@@ -1,0 +1,125 @@
+{
+  "common": {
+    "launchApp": "Bắt đầu sử dụng",
+    "learnMore": "Tìm hiểu thêm",
+    "tryNow": "Thử ngay",
+    "free": "Miễn phí"
+  },
+  "landing": {
+    "badge": "EdTech Track by ETEST",
+    "heroTitle1": "Từ Hồ Sơ đến Học Bổng",
+    "heroTitle2": "— Chỉ trong 60 giây.",
+    "heroSubtitle": "Upload bảng điểm, CV, chứng chỉ. AI tự động tìm 100+ trường phù hợp và dự đoán cơ hội học bổng của bạn.",
+    "problemTitle": "Thực trạng hiện nay",
+    "problemSubtitle": "Hơn 56,000 học sinh Việt Nam apply du học mỗi năm mà không biết cơ hội thực tế của mình.",
+    "problems": {
+      "blind": {
+        "title": "Apply Mù Quáng",
+        "desc": "Nộp đơn 10-20 trường mà không biết trường nào thực sự phù hợp. Tốn thời gian, tiền bạc và cơ hội."
+      },
+      "expensive": {
+        "title": "Chi Phí Cao",
+        "desc": "Phí apply $50-100/trường. Học bổng lại phân bố không đều. Nhiều em bỏ lỡ cơ hội vì thiếu thông tin."
+      },
+      "noTool": {
+        "title": "Thiếu Công Cụ",
+        "desc": "Không có công cụ nào giúp định lượng cơ hội một cách khoa học. Chỉ dựa vào cảm tính và lời khuyên không chính xác."
+      }
+    },
+    "solutionTitle": "Giải pháp của chúng tôi",
+    "solutionSubtitle": "Một nền tảng. Tất cả thông tin. Quyết định đúng đắn.",
+    "solutions": {
+      "upload": {
+        "title": "Upload Hồ Sơ",
+        "desc": "Kéo thả bảng điểm, CV, chứng chỉ IELTS/SAT. AI tự động trích xuất thông tin trong vài giây."
+      },
+      "research": {
+        "title": "AI Tìm 100+ Trường",
+        "desc": "Hệ thống tìm kiếm thông tin admission, học bổng từ 100+ trường đại học hàng đầu thế giới theo thời gian thực."
+      },
+      "predict": {
+        "title": "Dự Đoán Khoa Học",
+        "desc": "Sử dụng phân tích dữ liệu tiên tiến để tính toán khả năng đỗ và nhận học bổng tại từng trường."
+      },
+      "simulate": {
+        "title": "Mô Phỏng Cải Thiện",
+        "desc": "Nếu SAT tăng thêm 100 điểm? Xem ngay cơ hội tại trường mơ ước tăng bao nhiêu phần trăm."
+      }
+    },
+    "howItWorksTitle": "Cách sử dụng",
+    "steps": {
+      "upload": "Upload hồ sơ của bạn",
+      "uploadDesc": "Kéo thả bảng điểm, CV, chứng chỉ. Hỗ trợ nhiều định dạng file.",
+      "auto": "AI tự động phân tích",
+      "autoDesc": "Hệ thống trích xuất thông tin và tìm kiếm dữ liệu trường phù hợp.",
+      "result": "Xem kết quả dự đoán",
+      "resultDesc": "Nhận danh sách trường được phân loại: Mơ ước, Phù hợp, An toàn.",
+      "simulate": "Mô phỏng cải thiện",
+      "simulateDesc": "Điều chỉnh các yếu tố để xem cơ hội thay đổi như thế nào.",
+      "apply": "Apply thông minh",
+      "applyDesc": "Nộp đơn vào các trường phù hợp với chiến lược rõ ràng."
+    },
+    "compareTitle": "Tại sao chọn chúng tôi?",
+    "compare": {
+      "scholarship": "Dự đoán học bổng",
+      "realtime": "Dữ liệu thời gian thực",
+      "profile": "Tự động trích xuất hồ sơ",
+      "science": "Phân tích khoa học",
+      "vietnam": "Tối ưu cho học sinh Việt",
+      "free": "Miễn phí sử dụng"
+    },
+    "techTitle": "Công nghệ",
+    "teamTitle": "Đội ngũ phát triển",
+    "teamDesc": "Phú Nhuận Builder × SOTA Works — Xây dựng công cụ AI giúp học sinh Việt tiếp cận cơ hội giáo dục quốc tế.",
+    "ctaTitle": "Sẵn sàng bắt đầu?",
+    "ctaSubtitle": "Từ hồ sơ đến dự đoán học bổng trong chưa đầy 1 phút. Hoàn toàn miễn phí.",
+    "footer": "SOTA StatWorks — Từ Hồ Sơ đến Học Bổng, Nhanh Chóng & Chính Xác. © 2026"
+  },
+  "app": {
+    "upload": {
+      "title": "Upload Hồ Sơ",
+      "dropzone": "Kéo thả file bảng điểm vào đây hoặc click để chọn",
+      "maxFiles": "Tối đa 3 file",
+      "formats": "Chỉ chấp nhận: .xlsx, .xls, .csv",
+      "processing": "Đang xử lý...",
+      "errorTooMany": "Tối đa 3 file. Vui lòng chọn ít file hơn.",
+      "errorFormat": "Định dạng không hỗ trợ. Chỉ chấp nhận file Excel (.xlsx, .xls, .csv)"
+    },
+    "chat": {
+      "title": "Phân Tích Hồ Sơ",
+      "placeholder": "Nhập câu hỏi hoặc để AI tự động phân tích...",
+      "analyzing": "Đang phân tích hồ sơ..."
+    },
+    "viewer": {
+      "title": "Xem Dữ Liệu",
+      "noData": "Chưa có dữ liệu. Hãy upload hồ sơ trước."
+    },
+    "history": {
+      "title": "Lịch Sử",
+      "uploads": "File đã upload",
+      "chat": "Phân tích",
+      "noUploads": "Chưa có file nào được upload",
+      "noHistory": "Chưa có lịch sử phân tích"
+    }
+  },
+  "scholarship": {
+    "title": "Dự Đoán Học Bổng",
+    "dream": "Mơ ước",
+    "target": "Phù hợp",
+    "safety": "An toàn",
+    "matchScore": "Khả năng đỗ",
+    "strengths": "Điểm mạnh",
+    "weaknesses": "Cần cải thiện",
+    "simulate": {
+      "title": "Mô Phỏng Cải Thiện",
+      "selectSchool": "Chọn trường",
+      "selectFactor": "Chọn yếu tố cần thay đổi",
+      "newValue": "Giá trị mới",
+      "result": "Kết quả mới",
+      "change": "Thay đổi",
+      "levelChange": "Chuyển cấp độ"
+    },
+    "recommendation": "Khuyến nghị",
+    "factors": "Yếu tố ảnh hưởng"
+  }
+}

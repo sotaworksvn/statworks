@@ -10,7 +10,8 @@ export interface ClerkUser {
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 
-export type ActiveView = "upload" | "chat" | "data-viewer" | "dashboard" | "history";
+// "dashboard" removed — Monitor feature removed in EdTech track
+export type ActiveView = "upload" | "chat" | "data-viewer" | "history";
 
 // ─── Upload ───────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,8 @@ export interface UploadedFile {
   readonly uploaded_at: string;
   readonly columns: readonly Column[];
   readonly row_count: number;
+  /** File size in bytes — used for history display */
+  readonly file_size?: number;
 }
 
 // ─── Analysis ─────────────────────────────────────────────────────────────────
@@ -53,14 +56,36 @@ export interface DecisionTrace {
   readonly reason: string;
 }
 
+// ─── Scholarship ──────────────────────────────────────────────────────────────
+
+export interface SchoolMatch {
+  readonly school_name: string;
+  readonly country: string;
+  readonly match_score: number;
+  readonly match_level: "dream" | "target" | "safety";
+  readonly strengths: readonly string[];
+  readonly weaknesses: readonly string[];
+}
+
+export interface SimulationResult {
+  readonly type: string;
+  readonly school_name: string;
+  readonly current_score: number;
+  readonly new_score: number;
+  readonly delta: number;
+  readonly level_change: string | null;
+}
+
 export interface InsightResult {
   readonly summary: string;
   readonly drivers: readonly DriverResult[];
   readonly r2: number | null;
   readonly recommendation: string;
-  readonly model_type: "regression" | "pls" | null;
+  readonly model_type: "regression" | "pls" | "scholarship_pls" | null;
   readonly decision_trace: DecisionTrace;
-  readonly result_type?: string;
+  readonly result_type?: "driver_analysis" | "scholarship_prediction" | string;
+  readonly school_matches?: readonly SchoolMatch[];
+  readonly student_profile?: Record<string, unknown>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly table_data?: Record<string, any> | null;
   /** If intent was not driver_analysis */
@@ -68,14 +93,14 @@ export interface InsightResult {
   readonly suggestion?: string;
 }
 
-// ─── Simulation ───────────────────────────────────────────────────────────────
+// ─── Legacy Simulation (what-if for driver analysis) ─────────────────────────
 
 export interface ImpactResult {
   readonly variable: string;
   readonly delta_pct: number;
 }
 
-export interface SimulationResult {
+export interface DriverSimulationResult {
   readonly variable: string;
   readonly delta: number;
   readonly impacts: readonly ImpactResult[];

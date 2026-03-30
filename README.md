@@ -2,13 +2,13 @@
 
 <img src="frontend/public/logo.png" alt="SOTA StatWorks" width="400" />
 
-### From Data to Decisions, Instantly
+### From Student Data to Scholarship Opportunities, Instantly
 
-**AI-powered statistical decision engine** that turns raw data into ranked insights and what-if simulations — without statistical expertise.
+**AI-powered student profile analysis engine** that turns raw academic data into scholarship opportunities, capability insights, and personalized roadmaps — without any statistical expertise.
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![LotusHacks 2026](https://img.shields.io/badge/LotusHacks-2026-orange.svg)](https://lotushack.org)
-[![Track: Enterprise](https://img.shields.io/badge/Track-Enterprise%20by%20TinyFish-purple.svg)]()
+[![Track: EdTech by ETEST](https://img.shields.io/badge/Track-EdTech%20by%20ETEST-green.svg)]()
 
 ---
 
@@ -22,80 +22,77 @@
 
 ## 🧩 The Problem
 
-Current data analysis tools weren't built for decision-makers — they were built for statisticians.
+Students in Vietnam have strong academic records but miss out on scholarships because:
 
-- **SPSS** requires training, expensive licenses, and manual interpretation
-- **SmartPLS** demands SEM modeling expertise most teams don't have
-- **Excel** can chart data but can't tell you *what drives your outcomes*
-- **ChatGPT** can discuss statistics but can't run real models on your data
+- **No unified view** of their own profile — GPA, certificates, activities scattered across documents
+- **No awareness** of matching scholarship opportunities abroad
+- **No personalized roadmap** — generic advice that doesn't account for their actual strengths and gaps
+- **Existing tools** like SPSS or SmartPLS require statistical expertise most high-schoolers don't have
 
-**The gap:** Business leaders need answers, not p-values. They need to know *"What should I focus on?"*, not *"What is the beta coefficient of X?"*
+**The gap:** A student with a 8.88 GPA, TOEFL 112, and 2 national-level awards doesn't know they're in the **Top 1%** — and doesn't know which universities would actively recruit them.
 
 ## 💡 The Solution
 
-**SOTA StatWorks** — one screen, one question, one decision.
+**SOTA StatWorks — EdTech Track** — one screen, three Excel files, one complete scholarship roadmap.
 
-Upload a dataset (CSV or Excel), ask a natural-language question like *"What affects customer retention?"*, and get:
+Upload GPA, activity, and certificate files, ask in natural language, and get:
 
-1. **AI-parsed intent** — GPT-5.4-mini identifies which variables you're asking about
-2. **Automated statistical analysis** — Decision Router selects the optimal engine (OLS or PLS-SEM)
-3. **Executive summary** — GPT-5.4 translates results into jargon-free business language
-4. **Driver ranking chart** — Visual ranking of key drivers with impact strength
-5. **What-if simulation** — Adjust any driver by ±50% and instantly see predicted impact
+1. **Capability Analysis** — SPSS-equivalent statistical breakdown: GPA trend, subject-level descriptive stats, strength breakdown by area
+2. **Scholarship Opportunities** — AI web-searched opportunities matched to the student's exact profile tier, with match scores and deadlines
+3. **Personalized Roadmap** — Month-by-month action plan from now to application deadline
+4. **Simulate Bar** — Adjust GPA, test scores, or award level to see predicted impact on match score for any target university
 
-No statistical knowledge required. No manual model configuration. No jargon.
+No statistical knowledge required. No manual configuration. No jargon.
 
 ## ✨ What Makes Us Different
 
-| Feature | SPSS | SmartPLS | ChatGPT | **SOTA StatWorks** |
-|---------|------|----------|---------|-------------------|
-| Natural language questions | ❌ | ❌ | ✅ | ✅ |
-| Real statistical engines | ✅ | ✅ | ❌ | ✅ |
-| Auto model selection | ❌ | ❌ | ❌ | ✅ |
-| Jargon-free insights | ❌ | ❌ | ~  | ✅ |
-| What-if simulation | ❌ | ❌ | ❌ | ✅ |
-| No training needed | ❌ | ❌ | ✅ | ✅ |
-| Free & open source | ❌ | ❌ | ❌ | ✅ |
+| Feature | Tư vấn tay | ChatGPT | **SOTA StatWorks EdTech** |
+|---------|-----------|---------|--------------------------|
+| Real statistical analysis of transcript | ❌ | ❌ | ✅ |
+| Web-searched, up-to-date scholarships | ❌ | ~ | ✅ |
+| Match score per university | ❌ | ❌ | ✅ |
+| Personalized month-by-month roadmap | ❌ | ~ | ✅ |
+| What-if simulation | ❌ | ❌ | ✅ |
+| Multi-file upload (GPA + Activity + Cert) | ❌ | ❌ | ✅ |
+| Free & open source | ❌ | ❌ | ✅ |
 
 ---
 
 ## 🚀 Features
 
-### 📤 Smart Upload
-- Drag-and-drop or click to upload `.csv` / `.xlsx` datasets
-- Optional context files (`.docx`, `.pptx`) for richer AI understanding
-- Auto-detects column types, strips whitespace, validates data quality
-- Persists to Cloudflare R2 + Supabase for authenticated users
+### 📤 Smart Multi-File Upload
+- Upload up to 3 Excel files simultaneously: **GPA transcript**, **activity & awards**, **certificates**
+- Auto-detects file type from filename and content
+- Parses Vietnamese academic format: semester GPA tables, award levels (Quốc tế / Quốc gia / Thành phố), test scores
 
-### 🤖 AI-Powered Analysis
-- **2-call LLM pipeline**: Intent parsing (GPT-5.4-mini) → Insight generation (GPT-5.4)
-- **Decision Router**: Automatically selects OLS Regression or PLS-SEM based on dataset structure
-- **4-layer fallback chain**: System never crashes — gracefully degrades at every step
-- **Jargon ban**: AI is instructed to never use statistical terminology
+### 📊 Capability Analysis (SPSS-equivalent)
+- **GPA Trend Table** — average GPA per semester across 5 semesters (HK1 Lớp 10 → HK1 Lớp 12)
+- **Subject Stats Table** — mean, std deviation, min/max, trend direction per subject
+- **Strength Breakdown** — normalized scores across STEM, Language, International Certificates, Activities, Research & Awards
+- **Key Insights** — plain-language bullet points about the student's standout qualities
+- **Strengths & Gaps** — actionable items for scholarship competitiveness
 
-### 📊 Driver Ranking
-- Horizontal bar chart with proper axes, tick marks, and grid lines
-- Color-coded: green (positive impact) / red (negative impact)
-- Tooltip with detailed impact value, p-value, and significance
-- Sorted by absolute impact strength (strongest first)
+### 🎓 Scholarship Opportunities
+- AI web search via OpenAI for real, current scholarship opportunities matched to student tier
+- Match score (0–100%) per university based on GPA, test scores, awards, activities
+- Filter by **Mơ ước / Phù hợp / An toàn** (dream / target / safety)
+- Deadline, amount (USD/yr), GPA requirement displayed in a clean table
+- Match reasons explained per opportunity
 
-### 🔮 What-If Simulation
-- Pick any driver variable from a dropdown
-- Adjust by -50% to +50% with a precision slider
-- Click **Simulate** → see predicted impact on the target variable
-- DFS graph propagation for multi-hop effects
+### 🗓 Personalized Roadmap
+- Month-by-month milestones from current date to application deadline
+- Phases: **improve → prep → apply → wait**
+- Priority-coded (high / medium / low) with actionable notes
+
+### 🎮 Simulate Bar
+- Select any matched university and any criterion (GPA, SAT, IELTS, TOEFL, award rank, activities)
+- Adjust via slider or option selector
+- Instantly see predicted match score change with visual progress bar
 
 ### 🔐 Authentication
 - Clerk-powered sign-in/sign-up (email + social providers)
-- Auth-gated `/app` route — must sign in before accessing the workspace
-- User data synced to Supabase for persistent datasets and analysis history
-
-### 📱 Polished UI/UX
-- Landing page with hero, feature sections, comparison table, and team logos
-- Responsive design with Tailwind CSS v4
-- Micro-animations via Framer Motion
-- Press Start 2P font for decorative headings + Poppins for content
-- Toast notifications (Sonner) for success/error feedback
+- Auth-gated `/app` route
+- User data synced to Supabase
 
 ---
 
@@ -107,10 +104,19 @@ No statistical knowledge required. No manual model configuration. No jargon.
 | Python 3.11+ | Runtime |
 | FastAPI | Web framework |
 | NumPy + Pandas | Statistical computation |
-| OpenAI GPT-5.4 | LLM for intent parsing + insights |
+| OpenAI GPT-4o / GPT-4o-mini | LLM for intent parsing, insights, web search |
 | Supabase | PostgreSQL metadata storage |
 | Cloudflare R2 | Object storage (S3-compatible) |
 | Clerk | Authentication |
+
+### Backend — Student Analysis Pipeline
+| Module | Purpose |
+|--------|---------|
+| `backend/student/profile_extractor.py` | Multi-file Excel parser (GPA, Activity, Certificate) |
+| `backend/student/analyzer.py` | SPSS-equivalent capability analysis |
+| `backend/student/scholarship_searcher.py` | AI web search for matching scholarships |
+| `backend/student/roadmap.py` | Personalized roadmap generator |
+| `backend/llm/web_search.py` | OpenAI web search integration |
 
 ### Frontend
 | Technology | Purpose |
@@ -120,8 +126,6 @@ No statistical knowledge required. No manual model configuration. No jargon.
 | TypeScript 5 | Type safety |
 | Tailwind CSS 4 | Styling |
 | Zustand 5 | State management |
-| React Query 5 | Server state / mutations |
-| Recharts 3 | Data visualization |
 | Framer Motion 12 | Animations |
 | Clerk | Authentication UI |
 
@@ -133,37 +137,40 @@ No statistical knowledge required. No manual model configuration. No jargon.
 - Python 3.11+
 - Node.js 20+
 - npm 9+
+- OpenAI API key (with web search access)
 
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/your-org/sota-statworks-pro.git
-cd sota-statworks-pro
+git clone https://github.com/sotaworksvn/statworks.git
+cd statworks
+git checkout edtech-etest
 ```
 
 ### 2. Backend setup
 
 ```bash
-cd backend
-cp .env.example .env    # Edit with your API keys
-pip install -e .
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+cp backend/.env.example backend/.env    # Add OPENAI_API_KEY
+pip install -e backend
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### 3. Frontend setup
 
 ```bash
 cd frontend
-cp .env.local.example .env.local    # Edit with your config
+cp .env.local.example .env.local    # Add NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
 npm install
 npm run dev
 ```
 
-### 4. Open the app
+### 4. Test with sample data
 
-Navigate to [http://localhost:3000](http://localhost:3000)
+Upload the 3 Excel files from `dataset/THPT1_NguyenVanAn_*.xlsx`, then ask:
 
-> 📖 Detailed setup guides: [Backend Guide](.docs/guide-line/01-backend.md) · [LLM Guide](.docs/guide-line/02-llm.md) · [Frontend Guide](.docs/guide-line/03-frontend.md) · [Deployment Guide](.docs/guide-line/04-deployment.md)
+> *"Dựa trên dữ liệu của Nguyễn Văn An, hãy phân tích và cho tôi biết cơ hội học bổng"*
+
+> 📖 Detailed guides: [Backend](.docs/guide-line/01-backend.md) · [LLM](.docs/guide-line/02-llm.md) · [Frontend](.docs/guide-line/03-frontend.md) · [Deployment](.docs/guide-line/04-deployment.md)
 
 ---
 
@@ -171,34 +178,32 @@ Navigate to [http://localhost:3000](http://localhost:3000)
 
 ```
 sota-statworks-pro/
-├── backend/                 # FastAPI backend
-│   ├── main.py              # App entry point, CORS, routers
-│   ├── upload.py            # POST /upload
-│   ├── analyze.py           # POST /analyze (full AI pipeline)
-│   ├── simulate.py          # POST /simulate (what-if)
-│   ├── engines/             # Statistical engines (OLS, PLS, Simulation)
-│   ├── llm/                 # LLM integration (parser, insight, client)
-│   ├── db/                  # Supabase client
-│   ├── storage/             # Cloudflare R2 client
-│   ├── auth/                # Clerk auth context
-│   └── tests/               # 20 test functions, 143 assertions
-├── frontend/                # Next.js frontend
-│   ├── app/                 # App Router pages
-│   ├── components/          # React components
-│   ├── lib/                 # API client, store, types
-│   └── hooks/               # Custom hooks (auth sync)
-├── .docs/                   # Documentation
-│   ├── 01-prd.md            # Product Requirements Document
-│   ├── 02-system-design.md  # System Design Document
-│   ├── 03-features-spec.md  # Feature Specifications
-│   ├── 04-rule.md           # Engineering Rules
-│   └── guide-line/          # Developer Guides
-│       ├── 01-backend.md
-│       ├── 02-llm.md
-│       ├── 03-frontend.md
-│       └── 04-deployment.md
-├── render.yaml              # Render.com infrastructure config
-└── LICENSE                  # AGPL-3.0
+├── backend/                     # FastAPI backend
+│   ├── main.py                  # App entry point, CORS, routers
+│   ├── upload.py                # POST /upload (multi-file support)
+│   ├── analyze.py               # POST /analyze (full AI pipeline)
+│   ├── student/                 # EdTech analysis pipeline
+│   │   ├── profile_extractor.py # Multi-file Excel parser
+│   │   ├── analyzer.py          # SPSS-equivalent capability analysis
+│   │   ├── scholarship_searcher.py  # AI web search for scholarships
+│   │   └── roadmap.py           # Personalized roadmap generator
+│   ├── engines/                 # Statistical engines (OLS, PLS-SEM)
+│   ├── llm/                     # LLM integration (parser, insight, web_search)
+│   ├── scholarship/             # Scholarship matching & simulation
+│   ├── db/                      # Supabase client
+│   └── tests/                   # Backend tests
+├── frontend/                    # Next.js frontend
+│   ├── app/                     # App Router pages
+│   ├── components/
+│   │   ├── student/             # StudentProfilePanel (6-section EdTech UI)
+│   │   └── app/                 # Chat, upload, insight panels
+│   └── lib/                     # API client, store, types
+├── dataset/                     # Sample student data (3 profiles × 3 files)
+│   ├── THPT1_NguyenVanAn_*.xlsx
+│   ├── THPT2_TranThiBaoChau_*.xlsx
+│   └── THCS_LeHoangMinh_*.xlsx
+├── .docs/                       # Documentation
+└── LICENSE                      # AGPL-3.0
 ```
 
 ---
@@ -206,14 +211,25 @@ sota-statworks-pro/
 ## 🧪 Testing
 
 ```bash
-# Run all backend tests (20 functions, 143 assertions)
+# Run all backend tests
 python -m pytest backend/tests/ -v
+
+# Quick pipeline smoke test (requires backend running)
+python -c "
+import pandas as pd
+from backend.student.profile_extractor import extract_student_profile_full
+dfs = {
+  'GPA.xlsx': pd.read_excel('dataset/THPT1_NguyenVanAn_GPA.xlsx'),
+  'HoatDong.xlsx': pd.read_excel('dataset/THPT1_NguyenVanAn_HoatDong.xlsx'),
+  'ChungChi.xlsx': pd.read_excel('dataset/THPT1_NguyenVanAn_ChungChi.xlsx'),
+}
+p = extract_student_profile_full(dfs)
+print(p['name'], '|', p['overall_tier'], '|', p['composite_score'])
+# → Nguyễn Văn An | Top 1% | 92.1
+"
 
 # Frontend type-check
 cd frontend && npx tsc --noEmit
-
-# Frontend production build
-cd frontend && npm run build
 ```
 
 ---
@@ -225,7 +241,7 @@ cd frontend && npm run build
 | Backend   | [Render.com](https://render.com) | [Deployment Guide](.docs/guide-line/04-deployment.md#2-backend--rendercom) |
 | Frontend  | [Vercel](https://vercel.com) | [Deployment Guide](.docs/guide-line/04-deployment.md#3-frontend--vercel) |
 
-> ⚠️ **Security:** All API keys and secrets are set via platform dashboards. Never commit secrets to the repository.
+> ⚠️ **Security:** All API keys and secrets are set via platform environment variables. Never commit secrets to the repository.
 
 ---
 
@@ -257,7 +273,7 @@ cd frontend && npm run build
 
 This project was developed for the **[LotusHacks × HackHarvard × GenAI Fund Vietnam Hackathon 2026](https://lotushack.org)**.
 
-- **Track:** Enterprise by TinyFish
+- **Track:** EdTech by ETEST
 - **Year:** 2026
 
 ---

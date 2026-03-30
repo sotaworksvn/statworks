@@ -1,40 +1,40 @@
 import type { Metadata } from "next";
-import { Press_Start_2P, Poppins } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale, getMessages } from "next-intl/server";
 
-const pressStart = Press_Start_2P({
-  weight: "400",
-  subsets: ["latin"],
-  variable: "--font-press-start",
-  display: "swap",
-});
-
-const poppins = Poppins({
+const inter = Inter({
   weight: ["300", "400", "500", "600", "700"],
-  subsets: ["latin"],
-  variable: "--font-poppins",
+  subsets: ["latin", "vietnamese"],
+  variable: "--font-inter",
   display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "SOTA StatWorks — From Data to Decisions, Instantly",
+  title: "SOTA StatWorks — Từ Hồ Sơ đến Học Bổng",
   description:
-    "AI-powered statistical decision engine that turns raw data into ranked insights and simulations — without statistical expertise. Upload a dataset, ask a question, get a decision.",
+    "Nền tảng dự đoán học bổng AI cho học sinh Việt Nam. Upload bảng điểm, CV, chứng chỉ — AI tự động tìm 100+ trường phù hợp và dự đoán cơ hội học bổng trong 60 giây.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const locale = await getLocale();
+  const messages = await getMessages();
+
   return (
     <html
-      lang="en"
-      className={`${pressStart.variable} ${poppins.variable} h-full antialiased`}
+      lang={locale}
+      className={`${inter.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-white text-[#1A1A2E]">
-        <Providers>{children}</Providers>
+        <NextIntlClientProvider locale={locale} messages={messages}>
+          <Providers>{children}</Providers>
+        </NextIntlClientProvider>
       </body>
     </html>
   );

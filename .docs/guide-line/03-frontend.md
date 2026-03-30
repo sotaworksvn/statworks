@@ -224,7 +224,7 @@ Apply via Tailwind: `font-pixel` (Press Start 2P) or default (Poppins).
 
 ### Local Dev Checklist
 
-1. Start backend: `cd backend && python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000`
+1. Start backend (from project root): `python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload`
 2. Start frontend: `cd frontend && npm run dev`
 3. Open [http://localhost:3000](http://localhost:3000)
 4. Sign in via Clerk → Upload dataset → Ask question → Simulate

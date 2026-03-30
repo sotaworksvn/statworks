@@ -49,11 +49,8 @@ export function DataViewer() {
 
   // Track which IDs have been successfully fetched
   const fetchedIds = useRef<Set<string>>(new Set());
-  // Debounce timer for autosave
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-
-  // Build file tabs from uploaded files — uploadedFiles is the SOLE source of truth
+  // Build file tabs from uploaded files
   const fileTabs: FileTab[] = uploadedFiles
     .filter((f) => !closedTabs.has(f.id))
     .map((f) => ({ id: f.id, name: f.name, type: f.type }));
@@ -73,7 +70,7 @@ export function DataViewer() {
 
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
+    const timeout = setTimeout(() => controller.abort(), 8000);
 
     fetch(`${backendUrl}/api/data/${id}/content?limit=500`, {
       signal: controller.signal,
@@ -110,9 +107,7 @@ export function DataViewer() {
         } else if (err.name === "NotFound") {
           setErrorMessage(err.message);
           setIsRecoverable(false);
-          // Mark as "fetched" so HMR re-renders don't spam 404 requests
           fetchedIds.current.add(id);
-          // Remove stale entry from store permanently
           removeUploadedFile(id);
         } else {
           setErrorMessage(err.message || "Failed to load dataset content.");
@@ -125,9 +120,8 @@ export function DataViewer() {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, []);
+  }, [user?.id, removeUploadedFile]);
 
-  // Keep a ref to tabData to avoid adding it to useEffect deps
   const tabDataRef = useRef(tabData);
   tabDataRef.current = tabData;
 
@@ -153,18 +147,6 @@ export function DataViewer() {
       return;
     }
 
-    // Cache invalidation: if localParsedData was cleared (e.g., after AI edit),
-    // also clear component-level cache to force a re-fetch from backend
-    if (!localData && tabDataRef.current[activeTabId]) {
-      setTabData((prev) => {
-        const next = { ...prev };
-        delete next[activeTabId];
-        return next;
-      });
-      fetchedIds.current.delete(activeTabId);
-      // Fall through to fetch from server
-    }
-
     // Priority 2: Already fetched from server — show cached data
     if (tabDataRef.current[activeTabId]) {
       setFetchStatus("ok");
@@ -177,7 +159,7 @@ export function DataViewer() {
       return;
     }
 
-    // Priority 4: Fetch from server (R2 restore or live data)
+    // Priority 4: Fetch from server
     return doFetch(activeTabId);
   }, [activeTabId, doFetch, localParsedData]);
 
@@ -212,8 +194,8 @@ export function DataViewer() {
     return (
       <div className="data-viewer-empty">
         <div className="data-viewer-empty-icon">📊</div>
-        <h3>No Data Available</h3>
-        <p>Upload files to view and edit their content here.</p>
+        <h3>Chưa có dữ liệu</h3>
+        <p>Upload hồ sơ để xem nội dung tại đây.</p>
       </div>
     );
   }
@@ -238,7 +220,7 @@ export function DataViewer() {
                 e.stopPropagation();
                 handleCloseTab(tab.id);
               }}
-              title="Close tab"
+              title="Đóng tab"
             >
               ×
             </button>
@@ -246,12 +228,12 @@ export function DataViewer() {
         ))}
       </div>
 
-      {/* ── Content Area ───────────────────────────────────── */}
+      {/* ── Content Area ─── READ ONLY ────────────────────── */}
       <div className="data-viewer-content">
         {fetchStatus === "loading" ? (
           <div className="data-viewer-loading">
             <div className="data-viewer-loading-spinner" />
-            <p>Loading content...</p>
+            <p>Đang tải dữ liệu...</p>
           </div>
         ) : fetchStatus === "error" ? (
           <div className="data-viewer-error">
@@ -262,20 +244,20 @@ export function DataViewer() {
                 <div className="dv-error-emoji">{isRecoverable ? "⏳" : "📭"}</div>
               </div>
               <h3 className="data-viewer-error-title">
-                {isRecoverable ? "Connection Issue" : "Dataset Expired"}
+                {isRecoverable ? "Lỗi kết nối" : "Dữ liệu đã hết hạn"}
               </h3>
               <p className="data-viewer-error-msg">{errorMessage}</p>
               <div className="data-viewer-error-actions">
                 {isRecoverable ? (
                   <button className="data-viewer-retry-btn" onClick={handleRetry}>
-                    <span className="dv-btn-icon">↻</span> Retry
+                    <span className="dv-btn-icon">↻</span> Thử lại
                   </button>
                 ) : (
                   <button
                     className="data-viewer-retry-btn"
                     onClick={() => useAppStore.getState().setActiveView("upload")}
                   >
-                    <span className="dv-btn-icon">☁️</span> Upload New File
+                    <span className="dv-btn-icon">☁️</span> Upload lại
                   </button>
                 )}
               </div>
@@ -283,25 +265,23 @@ export function DataViewer() {
           </div>
         ) : activeData ? (
           activeFile?.type === ".docx" || activeFile?.type === ".pptx" ? (
-            /* Word/PowerPoint: Text content */
+            /* Word/PowerPoint: Text content — READ ONLY */
             <div className="data-viewer-text">
               <textarea
                 className="data-viewer-textarea"
-                defaultValue={activeData.contextText || "No text content extracted."}
-                readOnly={activeFile.type === ".pptx"}
+                defaultValue={activeData.contextText || "Không có nội dung văn bản."}
+                readOnly
               />
             </div>
           ) : (
-            /* Excel/CSV: Table with editable cells */
+            /* Excel/CSV: Table — READ ONLY, no editing */
             <div className="data-viewer-table-wrapper" ref={(el) => {
-              // Restore saved scroll position when table mounts
               if (el && activeTabId && _scrollPositions[activeTabId] !== undefined) {
                 requestAnimationFrame(() => {
                   el.scrollTop = _scrollPositions[activeTabId];
                 });
               }
             }} onScroll={(e) => {
-              // Save scroll position as user scrolls
               if (activeTabId) {
                 _scrollPositions[activeTabId] = e.currentTarget.scrollTop;
               }
@@ -323,61 +303,6 @@ export function DataViewer() {
                         <td
                           key={col}
                           className="data-viewer-td"
-                          contentEditable
-                          suppressContentEditableWarning
-                          onBlur={(e) => {
-                            const newVal = e.currentTarget.textContent ?? "";
-                            const oldVal = row[col] != null ? String(row[col]) : "";
-                            if (newVal !== oldVal) {
-                              // Update local state immediately
-                              setTabData((prev) => {
-                                const td = prev[activeTabId!];
-                                if (!td) return prev;
-                                const updatedRows = [...td.rows];
-                                updatedRows[i] = { ...updatedRows[i], [col]: newVal };
-                                return { ...prev, [activeTabId!]: { ...td, rows: updatedRows } };
-                              });
-
-                              // Debounced autosave: sync to backend DF + log to history
-                              if (saveTimer.current) clearTimeout(saveTimer.current);
-                              saveTimer.current = setTimeout(() => {
-                                const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
-
-                                // 1. Sync to backend DataFrame via PATCH
-                                fetch(`${backendUrl}/api/data/${activeTabId}/cells`, {
-                                  method: "PATCH",
-                                  headers: {
-                                    "Content-Type": "application/json",
-                                    ...(user?.id ? { "x-clerk-user-id": user.id } : {}),
-                                  },
-                                  body: JSON.stringify({
-                                    edits: [{ row: i, column: col, value: newVal }],
-                                  }),
-                                }).catch(() => {});
-
-                                // 2. Log to history
-                                fetch(`${backendUrl}/api/history`, {
-                                  method: "POST",
-                                  headers: {
-                                    "Content-Type": "application/json",
-                                    ...(user?.id ? { "x-clerk-user-id": user.id } : {}),
-                                  },
-                                  body: JSON.stringify({
-                                    category: "data",
-                                    title: `Edited ${col} row ${i + 1}: "${newVal.slice(0, 30)}"`,
-                                    snapshot: {
-                                      edit_description: `Changed ${col} in row ${i + 1} from "${oldVal}" to "${newVal}"`,
-                                      file_name: activeFile?.name,
-                                      row: i,
-                                      column: col,
-                                      old_value: oldVal,
-                                      new_value: newVal,
-                                    },
-                                  }),
-                                }).catch(() => {});
-                              }, 500);
-                            }
-                          }}
                         >
                           {row[col] != null ? String(row[col]) : ""}
                         </td>
@@ -388,7 +313,7 @@ export function DataViewer() {
               </table>
               {activeData.totalRows > activeData.rows.length && (
                 <div className="data-viewer-truncated">
-                  Showing {activeData.rows.length} of {activeData.totalRows} rows
+                  Hiển thị {activeData.rows.length} / {activeData.totalRows} hàng
                 </div>
               )}
             </div>
@@ -396,7 +321,7 @@ export function DataViewer() {
         ) : (
           <div className="data-viewer-loading">
             <div className="data-viewer-loading-spinner" />
-            <p>Loading content...</p>
+            <p>Đang tải dữ liệu...</p>
           </div>
         )}
       </div>

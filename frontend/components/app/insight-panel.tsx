@@ -18,6 +18,9 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ScholarshipResults } from "@/components/scholarship/scholarship-results";
+import { SimulationPanel } from "@/components/scholarship/simulation-panel";
+import { StudentProfilePanel, type StudentProfileResult } from "@/components/student/student-profile-panel";
 
 export function InsightPanel() {
   const { insight, isAnalyzing } = useAppStore();
@@ -69,6 +72,28 @@ export function InsightPanel() {
     );
   }
 
+  // ── Student Profile Analysis (6-section pipeline) ──
+  if (insight.result_type === "student_profile_analysis") {
+    return (
+      <section className="flex flex-1 flex-col p-4 gap-4 overflow-y-auto">
+        <StudentProfilePanel
+          insight={insight as unknown as StudentProfileResult}
+          fileId={undefined}
+        />
+      </section>
+    );
+  }
+
+  // ── Scholarship prediction (EdTech Track) ──
+  if (insight.result_type === "scholarship_prediction" && insight.school_matches) {
+    return (
+      <section className="flex flex-1 flex-col p-4 gap-4 overflow-y-auto">
+        <ScholarshipResults insight={insight} />
+        <SimulationPanel />
+      </section>
+    );
+  }
+
   // ── Non-regression results: comparison, general, summary, descriptive, data_edit ──
   const rt = insight.result_type ?? "regression";
   if (rt === "comparison" || rt === "general" || rt === "descriptive" || rt === "not_supported" || rt === "data_edit") {
@@ -87,6 +112,16 @@ export function InsightPanel() {
           })
         )
       : null;
+
+    // Build descriptive stats table data
+    const descriptiveVars: any[] | null =
+      rt === "descriptive" && tableData?.variables ? tableData.variables : null;
+
+    // Web search citations
+    const webCitations: Array<{ title: string; url: string }> | null =
+      tableData?.web_search_result && tableData?.citations?.length
+        ? tableData.citations
+        : null;
 
     const chartColors = ["#6366F1", "#22C55E", "#F59E0B", "#EF4444", "#06B6D4", "#8B5CF6", "#EC4899", "#14B8A6"];
 
@@ -109,13 +144,96 @@ export function InsightPanel() {
             transition={{ duration: 0.4, delay: 0 }}
             className="rounded-xl bg-[#F5F5F7] p-5 shrink-0"
           >
-            <p className="font-semibold text-[#2D3561] text-lg leading-snug">
-              {insight.summary}
-            </p>
+            {/* Render summary with preserved line breaks for web search answers */}
+            {insight.summary.split("\n").map((line, i) => (
+              <p key={i} className={`text-[#2D3561] leading-relaxed ${
+                i === 0 ? "font-semibold text-base mb-1" : "text-sm mt-1"
+              }`}>
+                {line}
+              </p>
+            ))}
           </motion.div>
         </AnimatePresence>
 
-        {/* ── (B) Comparison Chart ── */}
+        {/* ── (C1) Descriptive Statistics Table ── */}
+        {descriptiveVars && descriptiveVars.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.2 }}
+            className="rounded-xl border border-gray-100 p-4 overflow-x-auto shrink-0"
+          >
+            <h3 className="text-xs font-pixel text-[#2D3561] uppercase tracking-wider mb-3">
+              Descriptive Statistics
+            </h3>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  {["Variable", "N", "Mean", "Std Dev", "Min", "Median", "Max", "Skew"].map((h) => (
+                    <th key={h} className={`py-2 px-2 font-semibold text-[#2D3561] ${
+                      h === "Variable" ? "text-left" : "text-right"
+                    }`}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {descriptiveVars.map((v: any) => (
+                  <tr key={v.name} className="border-b border-gray-50 hover:bg-[#F5F5F7]/60 transition-colors">
+                    <td className="py-2 px-2 font-medium text-[#2D3561] max-w-[140px] truncate" title={v.name}>
+                      {v.name}
+                    </td>
+                    <td className="py-2 px-2 text-right text-gray-500">{v.count}</td>
+                    <td className="py-2 px-2 text-right text-[#2D3561] font-medium">{v.mean}</td>
+                    <td className="py-2 px-2 text-right text-gray-500">{v.std}</td>
+                    <td className="py-2 px-2 text-right text-gray-500">{v.min}</td>
+                    <td className="py-2 px-2 text-right text-gray-500">{v.median}</td>
+                    <td className="py-2 px-2 text-right text-gray-500">{v.max}</td>
+                    <td className={`py-2 px-2 text-right ${
+                      Math.abs(v.skewness ?? 0) > 1 ? "text-amber-500 font-medium" : "text-gray-400"
+                    }`}>{(v.skewness ?? 0).toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="text-xs text-gray-400 mt-2">
+              {descriptiveVars.length} variables · {tableData?.n_rows ?? "?"} observations
+            </p>
+          </motion.div>
+        )}
+
+        {/* ── (C2) Web Search Citations ── */}
+        {webCitations && webCitations.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.25 }}
+            className="rounded-xl border border-blue-100 bg-blue-50/40 p-4 shrink-0"
+          >
+            <h3 className="text-xs font-pixel text-blue-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <span>🌐</span> Nguồn / Sources
+            </h3>
+            <ul className="space-y-1">
+              {webCitations.map((c, i) => (
+                <li key={i} className="text-xs">
+                  {c.url ? (
+                    <a
+                      href={c.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline hover:text-blue-700 transition-colors"
+                    >
+                      {c.title || c.url}
+                    </a>
+                  ) : (
+                    <span className="text-gray-500">{c.title}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </motion.div>
+        )}
+
+        {/* ── (C3) Comparison Chart ── */}
         {comparisonChart && comparisonChart.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}

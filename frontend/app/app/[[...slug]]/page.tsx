@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useAppStore } from "@/lib/store";
 import { useUser, SignIn } from "@clerk/nextjs";
 import { useRouter, useParams } from "next/navigation";
@@ -10,7 +10,6 @@ import { ChatPanel } from "@/components/app/chat-panel";
 import { InsightPanel } from "@/components/app/insight-panel";
 import { SimulationBar } from "@/components/app/simulation-bar";
 import { DataViewer } from "@/components/app/data-viewer";
-import { Dashboard } from "@/components/app/dashboard";
 import { HistoryView } from "@/components/app/history-view";
 import { Toaster } from "@/components/ui/sonner";
 import Image from "next/image";
@@ -19,12 +18,10 @@ const HAS_CLERK_KEY = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 /** Safe useUser — returns anonymous defaults when ClerkProvider is absent */
 function useSafeUser() {
-  // When Clerk key exists, ClerkProvider wraps the tree → useUser is safe
   if (HAS_CLERK_KEY) {
     // eslint-disable-next-line react-hooks/rules-of-hooks
     return useUser();
   }
-  // No Clerk → anonymous mode, skip auth entirely
   return { isSignedIn: true as const, isLoaded: true, user: null };
 }
 
@@ -34,7 +31,7 @@ import type { ActiveView } from "@/lib/types";
 
 interface RouteState {
   view: ActiveView;
-  subTab?: string; // history tab or monitor tab
+  subTab?: string;
 }
 
 /** Map URL slug segments → Zustand view + optional sub-tab */
@@ -49,14 +46,10 @@ function slugToRoute(slug: string[] | undefined): RouteState {
       return { view: "chat" };
     case "viewer":
       return { view: "data-viewer" };
-    case "monitor":
-      if (secondary === "impact-analysis") return { view: "dashboard", subTab: "smartpls" };
-      return { view: "dashboard", subTab: secondary === "data-analysis" ? "spss" : "spss" };
     case "history":
+      if (secondary === "uploads") return { view: "history", subTab: "uploads" };
       if (secondary === "chat") return { view: "history", subTab: "chat" };
-      if (secondary === "viewer") return { view: "history", subTab: "data" };
-      if (secondary === "monitor") return { view: "history", subTab: "dashboard" };
-      return { view: "history", subTab: "chat" };
+      return { view: "history", subTab: "uploads" };
     default:
       return { view: "upload" };
   }
@@ -71,13 +64,9 @@ function viewToPath(view: ActiveView, subTab?: string): string {
       return "/app/chat";
     case "data-viewer":
       return "/app/viewer";
-    case "dashboard":
-      if (subTab === "smartpls") return "/app/monitor/impact-analysis";
-      return "/app/monitor/data-analysis";
     case "history":
-      if (subTab === "data") return "/app/history/viewer";
-      if (subTab === "dashboard") return "/app/history/monitor";
-      return "/app/history/chat";
+      if (subTab === "chat") return "/app/history/chat";
+      return "/app/history/uploads";
     default:
       return "/app";
   }
@@ -117,7 +106,7 @@ export default function AppPage() {
   if (!isLoaded) {
     return (
       <div className="flex h-screen items-center justify-center bg-white">
-        <div className="text-gray-400 text-sm animate-pulse">Loading…</div>
+        <div className="text-gray-400 text-sm animate-pulse">Đang tải…</div>
       </div>
     );
   }
@@ -129,7 +118,7 @@ export default function AppPage() {
         <div className="flex flex-col items-center gap-4">
           <Image src="/logo.png" alt="SOTA StatWorks" width={200} height={56} />
           <p className="text-gray-500 text-sm">
-            Sign in to start analyzing your data
+            Đăng nhập để bắt đầu dự đoán học bổng
           </p>
         </div>
         <SignIn
@@ -172,8 +161,8 @@ export default function AppPage() {
             ) : (
               <div className="app-view-empty">
                 <div className="app-view-empty-icon">💬</div>
-                <h3>No Dataset Loaded</h3>
-                <p>Upload a dataset first, then ask questions about your data here.</p>
+                <h3>Chưa có dữ liệu</h3>
+                <p>Upload bảng điểm trước, sau đó AI sẽ dự đoán học bổng cho bạn.</p>
               </div>
             )}
           </div>
@@ -183,13 +172,6 @@ export default function AppPage() {
         {activeView === "data-viewer" && (
           <div className="app-view app-view--data-viewer">
             <DataViewer />
-          </div>
-        )}
-
-        {/* ── Monitor ─────────────────────────────────────── */}
-        {activeView === "dashboard" && (
-          <div className="app-view app-view--dashboard">
-            <Dashboard />
           </div>
         )}
 
